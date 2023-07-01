@@ -5,7 +5,7 @@ use std::task::Context;
 use slog::{Drain, info, slog_warn, warn};
 use crate::errors::{Error as RaftError, StorageError};
 use raft_proto::ConfChangeI;
-use raft_proto::eraftpb::{ConfChange, ConfChangeV2, ConfState, Entry, Message};
+use raft_proto::eraftpb::{ConfChange, ConfChangeV2, ConfState, Entry, Message, MessageType};
 use crate::{BaseStatus, Config, Peer, raft, RawNode, Ready, SnapshotStatus, storage, Storage};
 use crate::storage::MemStorage;
 use slog::{error, o};
@@ -17,7 +17,7 @@ use tokio::select;
 use raft_proto::eraftpb::MessageType::{MsgHup, MsgPropose, MsgReadIndex, MsgSnapStatus, MsgTransferLeader, MsgUnreachable};
 
 use crate::async_ch::{Channel, MsgWithResult};
-use crate::raw_node::{is_response_msg, SafeRawNode};
+use crate::raw_node::{is_local_msg, is_response_msg, SafeRawNode};
 use crate::status::Status;
 
 
@@ -87,7 +87,7 @@ impl<T> InnerChan<T> {
 }
 
 
-// #[derive(Clone)]
+#[derive(Clone)]
 pub(crate) struct InnerNode<'a, S: Storage> {
     pub(crate) prop_c: Channel<MsgWithResult>,
     pub(crate) recv_c: Channel<Message>,
@@ -119,18 +119,19 @@ impl<S: Storage + Send + Sync + 'static> InnerNode<'_,S> {
         }
     }
 
-    async fn run(&mut self) {
+
+
+     async fn run(&mut self) {
         let mut wait_advance = false;
         let mut ready = Ready::default();
         let mut first = true;
-
-
         loop {
             {
                 let mut has_ready = false;
                 {
-                    if !wait_advance && self.rl_raw_node().has_ready()&& !first{
-                        ready =self.rl_raw_node().ready_without_accept();
+                    if !wait_advance && self.rl_raw_node().has_ready() && !first {
+                        ready = self.rl_raw_node().ready_without_accept();
+                        has_ready = true;
                     }
                 }
                 if has_ready {
@@ -138,63 +139,78 @@ impl<S: Storage + Send + Sync + 'static> InnerNode<'_,S> {
                     self.wl_raw_node().accept_ready(&ready);
                     wait_advance = true;
                 }
+                first = false;
             }
-            select! {
-                conf = self.conf_c.rx_ref().recv() => {
-                    let cc:ConfChangeV2 = conf.unwrap();
-                    let mut cs =ConfState::new();
-                    {
-                        let mut raw_node = self.wl_raw_node();
-                        let ok_before = raw_node.raft.prs.progress.contains_key(&raw_node.raft.id);
-                        cs =raw_node.apply_conf_change(&cc).unwrap();
-                        let (ok_after,id) =(raw_node.raft.prs.progress.contains_key(&raw_node.raft.id),raw_node.raft.id);
 
-                        // raw_node.apply_conf_change(&cc);
-                        if ok_before != ok_after {
-                            let _id =raw_node.raft.id;
-                            let found = cs.get_voters().iter().any(|id| *id == _id) || cs.get_voters_outgoing().iter().any(|id| *id == _id);
-                            if !found {
-                                println!("Current node({:#x}) isn't voter", id);
-                            }
+            // pin_mut!(&self);
+            select! {
+                    conf = self.conf_c.rx_ref().recv() => {
+                        let cc: ConfChangeV2 = conf.unwrap();
+                        let mut cs = ConfState::new();
+                        //  cs =raw_node.apply_conf_change(&cc).unwrap();
+                        {
+                             let mut raw_node = self.wl_raw_node();
+                             let ok_before = raw_node.raft.prs.progress.contains_key(&raw_node.raft.id);
+                             cs =raw_node.apply_conf_change(&cc).unwrap();
+                             let (ok_after, id) = (raw_node.raft.prs.progress.contains_key(&raw_node.raft.id), raw_node.raft.id);
+                             if ok_before && !ok_after {
+                                   let _id = raw_node.raft.id;
+                                   let found = cs.get_voters().iter().any(|id| *id == _id) || cs.get_voters_outgoing().iter().any(|id| *id == _id);
+                                   if !found {
+                                       println!("Current node({:#x}) isn't voter", id);
+                                   }
+                             }
+                        }
+
+                        select! {
+                            _ = self.conf_state_c.tx_ref().send(cs) => {}
+                            _ = self.done.recv() => {}
                         }
                     }
-                    select! {
-                        _ = self.conf_state_c.tx_ref().send(cs) => {}
-                        _ = self.done.recv() => {}
+                    pm = self.prop_c.recv() => {
+                        let mut pm: MsgWithResult = pm.unwrap();
+                        if !self.is_voter() {
+                            pm.notify(Err(RaftError::NotIsVoter)).await;
+                        }else if !self.rl_raw_node().raft.has_leader() {
+                            pm.notify(Err(RaftError::NoLeader)).await;
+                        }else {
+                              let mut msg: Message = pm.get_msg().unwrap().clone();
+                              msg.set_from(self.rl_raw_node().raft.id);
+                              let res = self.wl_raw_node().step(msg);
+                              pm.notify_and_close(res).await;
+                        }
                     }
-                }
-                pm = self.prop_c.recv() => {
-                    let mut pm: MsgWithResult = pm.unwrap();
-                    if !self.is_voter() {
-                        pm.notify(Err(RaftError::NotIsVoter)).await;
-                    }else if !self.rl_raw_node().raft.has_leader() {
-                        pm.notify(Err(RaftError::NoLeader)).await;
-                    }else {
-                          let mut msg: Message = pm.get_msg().unwrap().clone();
-                          msg.set_from(self.rl_raw_node().raft.id);
-                          let res = self.wl_raw_node().step(msg);
-                          pm.notify_and_close(res).await;
+                    msg = self.recv_c.recv() => {
+                        let msg: Message = msg.unwrap();
+                        // filter out response message from unknown From.
+                        let mut raw_node = self.wl_raw_node();
+                        let is_pr = raw_node.raft.prs.progress.contains_key(&msg.get_from());
+                        if is_pr || !is_response_msg(msg.get_msg_type()) {
+                           raw_node.raft.step(msg);
+                        }
                     }
-                }
-                msg = self.recv_c.recv() =>{
-                    let msg: Message = msg.unwrap();
-                    let mut raw_node = self.wl_raw_node();
-                    let is_pr = raw_node.raft.prs.progress.contains_key(&msg.get_from());
-                    if is_pr || !is_response_msg(msg.get_msg_type()){
-                        raw_node.step(msg);
+                    _ = self.tick_c.rx_ref().recv() => {
+                        self.tick().await;
                     }
-                }
-                _= self.tick_c.rx_ref().recv() => {
-                    // self.raw_node.rl().tick();
-                    self.tick();
-                }
-                _= self.ready_c.rx_ref().recv() => {
-                    self.wl_raw_node().advance(ready.clone());
-                    wait_advance =false;
-                }
+                    _ = self.advance.rx_ref().recv() => {
+                        {
+                            self.wl_raw_node().advance(ready.clone());
+                            wait_advance = false;
+                        }
+                    }
 
+                    _ = self.stop.rx_ref().recv() => {
+                        if let Some(tx) = self.done.take_tx() {
+                            tx.send(()).await;
+                        }
+                        return;
+                    }
+
+                    status = self.status.rx_ref().recv() => {
+                            let _status = Status::from(&self.raw_node.rl().raft);
+                            status.unwrap().send(_status).await;
+                }
             }
-
         }
     }
 
@@ -207,7 +223,7 @@ impl<S: Storage + Send + Sync + 'static> InnerNode<'_,S> {
     }
 
     async fn step_wait_option(&self, m: Message, wait: bool) -> SafeResult<()>{
-        if m.msg_type != MsgPropose {
+        if m.get_msg_type() != MsgPropose {
             select! {
                 _= self.recv_c.send(m.clone()) =>  return Ok(()),
                 _= self.done.recv() => {
@@ -243,7 +259,7 @@ impl<S: Storage + Send + Sync + 'static> InnerNode<'_,S> {
         }
     }
 
-    async fn get_status(&self) -> Status{
+    fn get_status(&self) -> Status{
         Status::from(&self.raw_node.rl().raft)
     }
 
@@ -333,7 +349,7 @@ pub trait Node {
     ///
     /// NOTE: No committed entries from the next Ready may be applied until all committed entries
     /// and snapshots from the previous one have finished.
-    async fn ready(&self) -> Receiver<Ready>;
+    fn ready(&self) -> Receiver<Ready>;
 
     /// Advance notifies the Node that the application has saved progress up to the last Ready.
     /// It prepares the node to return the next available Ready.
@@ -424,14 +440,19 @@ impl<S: Storage + Send + Sync + 'static> Node for InnerNode<'_,S>{
     }
 
     async fn step(&self, msg: Message) -> SafeResult<()> {
-        if is_response_msg(msg.get_msg_type()) {
+
+        // if msg.msg_type == MessageType::MsgHup {
+        //     return Ok(());
+        // }
+
+        if is_local_msg(msg.get_msg_type()) {
             return Ok(());
         }
         self.do_step(msg).await;
         Ok(())
     }
 
-    async fn ready(&self) -> Receiver<Ready> {
+    fn ready(&self) -> Receiver<Ready> {
         self.ready_c.rx()
     }
 
@@ -527,8 +548,12 @@ impl<S: Storage + Send + Sync + 'static> Node for InnerNode<'_,S>{
     }
 }
 
-pub(crate) async fn start_node<T:Storage+Send + Sync + Clone + 'static>(config: &Config, mut store: T, peers:Vec<Peer>) {
-
+pub(crate) async fn start_node<T:Storage+Send + Sync + Clone + 'static>(
+    config: Config,
+    mut store: T,
+    peers:Vec<Peer>
+) -> InnerNode<'static,T> {
+    assert!(!peers.is_empty(), "no peers given; use RestartNode instead");
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain)
@@ -542,5 +567,189 @@ pub(crate) async fn start_node<T:Storage+Send + Sync + Clone + 'static>(config: 
     let mut r = RawNode::new(&config, store, &default_logger).unwrap();
     r.bootstrap(peers).expect("TODO: panic message");
 
-    // let mut node = InnerNode::new(r, &default_logger);
+    let mut node = InnerNode::new(SafeRawNode::new(r));
+    let mut node1 = node.clone();
+    tokio::spawn(async move {
+        node1.run().await;
+    });
+    node
+}
+
+#[cfg(test)]
+mod tests {
+    use protobuf::ProtobufEnum;
+    use slog::{info, log, o};
+    // use tokio::net::windows::named_pipe::PipeMode::Message;
+    use raft_proto::eraftpb::{Message, MessageType};
+    use raft_proto::eraftpb::MessageType::{MsgPropose, MsgRequestPreVoteResponse};
+    use crate::async_ch::Channel;
+    use crate::node::{InnerChan, InnerNode, Node};
+    use crate::raw_node::is_local_msg;
+    use crate::{RawNode, ReadState};
+    use lazy_static::lazy_static;
+    use crate::storage::MemStorage;
+    use std::sync::{Arc, Mutex};
+    use env_logger::Env;
+    use protobuf::descriptorx::MessageOrEnumWithScope;
+    use crate::test_util::{new_raw_node, new_safe_raw_node, try_init_log};
+    use slog::Drain;
+    // use crate::tests_util::try_init_log;
+    lazy_static! {
+        /// This is an example for using doc comment attributes
+        static ref msgs: Arc<Mutex<Vec<Message>>> = Arc::new(Mutex::new(vec ! []));
+    }
+
+    #[test]
+    fn t_drop() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async move {
+            let mut ch: InnerChan<usize> = InnerChan::new();
+            let rx = ch.rx.take();
+            drop(rx);
+            let tx = ch.tx();
+            let res = tx.send(19).await;
+            assert!(res.is_err());
+        });
+    }
+
+    // ensures that node.step sends msgProp to propc chan
+    // and other kinds of messages to recvc chan.
+    #[tokio::test]
+    async fn t_node_step() {
+        try_init_log();
+        for msgn in 0..MsgRequestPreVoteResponse.value() {
+            let mut node: InnerNode<MemStorage> =
+                InnerNode::new(new_safe_raw_node(1, vec![1], 10, 1, MemStorage::new(), &slog::Logger::root(slog::Discard, o!())));
+            node.prop_c = Channel::new(1);
+            node.recv_c = Channel::new(1);
+            let msgt = MessageType::from_i32(msgn).unwrap();
+            let mut msg = Message::new();
+            msg.set_msg_type(msgt);
+
+            let ok = node.step(msg.clone()).await;
+
+            assert!(ok.is_ok(), "{:?}", ok.unwrap_err());
+
+            if msgt == MsgPropose {
+                let proposal_rx = node.prop_c.recv().await;
+                assert!(
+                    proposal_rx.is_ok(),
+                    "{}: cannot receive {:?} on propc chan",
+                    msgn,
+                    msgt
+                );
+            } else {
+                if is_local_msg(msgt) {
+                    assert!(
+                        node.recv_c.try_recv().await.is_err(),
+                        "{}: step should ignore {:?}",
+                        msgn,
+                        msgt
+                    );
+                } else {
+                    assert!(
+                        node.recv_c.try_recv().await.is_ok(),
+                        "{}: cannot receive {:?} on recvc chan",
+                        msgn,
+                        msgt
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn t_node_process() {
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain)
+            .chan_size(4096)
+            .overflow_strategy(slog_async::OverflowStrategy::Block)
+            .build()
+            .fuse();
+        let default_logger = slog::Logger::root(drain, o!("tag" => format!("[{}]", 1)));
+        try_init_log();
+        {
+            msgs.lock().unwrap().clear();
+        }
+        let s = MemStorage::new();
+        let raw_node = new_safe_raw_node(1, vec![1], 10, 1, s.clone(), &default_logger);
+        let mut node= InnerNode::<MemStorage>::new(raw_node);
+        let mut node1 = node.clone();
+        tokio::spawn(async move { node1.run().await });
+        let ok = node.campaign().await;
+        assert!(ok.is_ok(), "{:?}", ok.unwrap_err());
+        loop {
+            let rd = node.ready().recv().await.unwrap();
+            println!("get a ready_rx, wait it: {:?}",rd);
+            s.wl().append(rd.entries());
+            if rd.ss().as_ref().unwrap().leader_id == node.rl_raw_node().raft.leader_id {
+                node.advance().await;
+                break;
+            }
+            node.advance().await;
+        }
+
+        assert!(node.propose("somedata".as_bytes()).await.is_ok());
+        node.stop().await;
+        println!("mail-box: {:?}", node.raw_node.rl().raft.msgs)
+    }
+
+    #[tokio::test]
+    async fn t_node_read_index() {
+        try_init_log();
+
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain)
+            .chan_size(4096)
+            .overflow_strategy(slog_async::OverflowStrategy::Block)
+            .build()
+            .fuse();
+        let default_logger = slog::Logger::root(drain, o!("tag" => format!("[{}]", 1)));
+
+        let s = MemStorage::new();
+        let raw_node = new_safe_raw_node(1, vec![1], 10, 1, s.clone(), &default_logger);
+        let mut node = InnerNode::<MemStorage>::new(raw_node);
+        let wrs = vec![ReadState {
+            index: 1,
+            request_ctx: "somedata".as_bytes().to_vec(),
+        }];
+
+        {
+            node.wl_raw_node().raft.read_states = wrs.clone();
+        }
+
+        let mut node1 = node.clone();
+        tokio::spawn(async move { node1.run().await });
+
+        let ok = node.campaign().await;
+        assert!(ok.is_ok(), "{:?}", ok.unwrap_err());
+
+        loop {
+            println!("try again");
+            let ready = node.ready_c.rx();
+            let ready = ready.recv().await.unwrap();
+
+            {
+                let mut raw_node = node.wl_raw_node();
+                let expect = ready.read_states().clone();
+                assert_eq!(expect, wrs);
+                s.wl().append(ready.entries());
+
+                if ready.ss().as_ref().unwrap().leader_id == raw_node.raft.id {
+                    node.advance();
+                    break;
+                }
+            }
+
+            node.advance();
+        }
+
+        let w_request = "somedata2".as_bytes().to_vec();
+        node.read_index(w_request.clone());
+        assert!(node.propose("somedata".as_bytes()).await.is_ok());
+        println!("is");
+        // dbg!(x);
+        node.stop();
+    }
 }
