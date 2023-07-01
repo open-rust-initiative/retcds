@@ -27,7 +27,7 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use bytes::Bytes;
 use protobuf::Message as PbMessage;
 use raft_proto::ConfChangeI;
-use slog::{debug, Logger};
+use slog::{debug, Logger, o};
 
 use crate::eraftpb::{ConfState, Entry, EntryType, HardState, Message, MessageType, Snapshot};
 use crate::errors::{Error, Result};
@@ -64,9 +64,6 @@ impl<S: Storage> SafeRawNode<S> {
             raw_node: Arc::new(RwLock::new(raw_node)),
         }
     }
-    // pub fn new2(conf: Config, storage: S) -> Self {
-    //     Self::new(RawNode::new(&conf, storage))
-    // }
 
     /// returns the current status of the node.
     pub fn rl(&self) -> RwLockReadGuard<'_, RawNode<S>> {
@@ -165,7 +162,7 @@ impl Ready {
             snapshot: Snapshot::default(),
             is_persisted_msg: true,
             light,
-            must_sync: false,
+            must_sync: true,
         };
 
         if prev_soft_st.is_some() && raft.soft_state()!=prev_soft_st.unwrap() {
