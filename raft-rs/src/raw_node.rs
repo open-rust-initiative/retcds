@@ -906,7 +906,7 @@ impl<T: Storage> RawNode<T> {
             return Err(Error::ConfigInvalid("must provide at least one peer to Bootstrap".to_owned()));
         }
 
-        let last_index = self.raft.raft_log.last_index();
+        let last_index = self.raft.store().last_index()?;
         if last_index != 0{
             return Err(Error::ConfigInvalid("can't bootstrap a nonempty Storage".to_owned()));
         };
@@ -919,7 +919,6 @@ impl<T: Storage> RawNode<T> {
 
 
         for (i,peer) in peers.iter().enumerate() {
-
             let cc = ConfChange{
                 change_type: ConfChangeType::AddNode,
                 node_id: peer.id,
@@ -928,40 +927,30 @@ impl<T: Storage> RawNode<T> {
                 unknown_fields: Default::default(),
                 cached_size: Default::default(),
             };
-            let data = Bytes::from(cc.clone().write_to_bytes().unwrap());
+
+            let data = cc.write_to_bytes().map_err(|err| format!("{}", err)).unwrap();
 
 
-            let mut e = Entry::default();
-            e.set_index(i as u64 + 1);
+            let mut e = Entry::new();
+            e.set_index((i + 1) as u64);
             e.set_term(1);
             e.set_entry_type(EntryType::EntryConfChange);
-            e.set_data(data);
+            e.set_data(Bytes::from(data));
             ents.push(e);
         };
         self.raft.raft_log.append(&mut ents);
 
-    //     rn.raft.raftLog.committed = uint64(len(ents))
-    //     for _, peer := range peers {
-    //         rn.raft.applyConfChange(pb.ConfChange{NodeID: peer.ID, Type: pb.ConfChangeAddNode}.AsV2())
-    // }
-    //     return nil
-
         self.raft.raft_log.committed = ents.len() as u64;
 
-        for peer in peers {
-            let cc = ConfChange{
-                change_type: ConfChangeType::AddNode,
-                node_id: peer.id,
-                context: Bytes::from(peer.context.clone().unwrap()),
-                id: Default::default(),
-                unknown_fields: Default::default(),
-                cached_size: Default::default(),
-            };
+        for peer in &peers {
+            let mut cc = ConfChange::new();
+            cc.set_node_id(peer.id);
+            cc.set_change_type(ConfChangeType::AddNode);
+            let mut v2 =cc.as_v2();
             self.raft.apply_conf_change(&cc.as_v2());
-        };
+        }
 
         return Ok(());
-
     }
 }
 

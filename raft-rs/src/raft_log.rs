@@ -15,9 +15,8 @@
 // limitations under the License.
 
 use std::cmp;
-
-use slog::warn;
-use slog::Logger;
+// use sltotog::warn;
+use slog::{Logger, warn};
 
 use crate::eraftpb::{Entry, Snapshot};
 use crate::errors::{Error, Result, StorageError};
