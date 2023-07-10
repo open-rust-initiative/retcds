@@ -1,0 +1,13 @@
+
+syntax = "proto3";
+package snap;
+
+import "rustproto.proto";
+
+message Snapshot{
+  uint32 crc =1;
+  bytes data =2;
+}
+
+
+

@@ -21,14 +21,56 @@ pub use crate::protos::eraftpb;
 mod protos {
     include!(concat!(env!("OUT_DIR"), "/protos/mod.rs"));
 
+    use protobuf::Message;
+    use serde::{Serialize, Serializer};
+    use serde::ser::SerializeStruct;
+    use crate::eraftpb::{ConfState, SnapshotMetadata};
     use self::eraftpb::Snapshot;
 
+
+    impl Serialize for ConfState{
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+            let mut s = serializer.serialize_struct("ConfState", 7)?;
+            s.serialize_field("voters", &self.get_voters())?;
+            s.serialize_field("learners", &self.get_learners())?;
+            s.serialize_field("voters_outgoing", &self.get_voters_outgoing())?;
+            s.serialize_field("learners_next", &self.get_learners_next())?;
+            s.serialize_field("auto_leave", &self.get_auto_leave())?;
+            // s.serialize_field("unknown_fields", &self.get_unknown_fields())?;
+            // s.serialize_field("cached_size", &self.get_cached_size())?;
+            s.end()
+        }
+    }
+
+    impl Serialize for SnapshotMetadata{
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+            let mut s =serializer.serialize_struct("SnapshotMetadata", 5)?;
+            s.serialize_field("conf_state", &self.get_conf_state())?;
+            s.serialize_field("index", &self.get_index())?;
+            s.serialize_field("term", &self.get_term())?;
+            // s.serialize_field("unknown_fields", &self.get_unknown_fields())?;
+            // s.serialize_field("cached_size", &self.get_cached_size())?;
+            s.end()
+        }
+    }
+
+    impl Serialize for Snapshot{
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+            let mut s = serializer.serialize_struct("Snapshot", 4)?;
+            s.serialize_field("metadata", &self.get_metadata())?;
+            s.serialize_field("data", &self.get_data())?;
+            // s.serialize_field("unknown_fields", &self.get_unknown_fields())?;
+            // s.serialize_field("cached_size", &self.get_cached_size())?;
+            s.end()
+        }
+    }
     impl Snapshot {
         /// For a given snapshot, determine if it's empty or not.
         pub fn is_empty(&self) -> bool {
             self.get_metadata().index == 0
         }
     }
+
 }
 
 pub mod prelude {
