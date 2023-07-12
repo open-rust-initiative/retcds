@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::io::Error;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -9,7 +10,7 @@ use std::path::Path;
 pub type Result<T> = std::result::Result<T, Error>;
 
 
-async fn write_and_sync_file(filename: &str, content: &[u8],perm :u32) -> Result<()> {
+pub async fn write_and_sync_file(filename: &OsString, content: &[u8], perm :u32) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
