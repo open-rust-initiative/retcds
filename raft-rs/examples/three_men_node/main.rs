@@ -188,7 +188,7 @@ fn send_propose(logger: Logger, sender: mpsc::Sender<Msg>) {
 
         let (s1, r1) = mpsc::channel::<u8>();
 
-        info!(logger, "propose a request");
+        info!(, "propose a request");
 
         // Send a command to the Raft, wait for the Raft to apply it
         // and get the result.
@@ -204,6 +204,6 @@ fn send_propose(logger: Logger, sender: mpsc::Sender<Msg>) {
         let n = r1.recv().unwrap();
         assert_eq!(n, 0);
 
-        info!(logger, "receive the propose callback");
+        info!(, "receive the propose callback");
     });
 }
