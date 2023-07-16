@@ -87,7 +87,7 @@ pub enum SnapshotStatus {
     Failure,
 }
 
-    /// Checks if certain message type should be used internally.
+    /// Checks if certain message types should be used internally.
 pub fn is_local_msg(t: MessageType) -> bool {
     matches!(
         t,
@@ -99,7 +99,7 @@ pub fn is_local_msg(t: MessageType) -> bool {
     )
 }
 
-/// Checks if the given message type is for response.
+/// Checks if the given message types is for response.
 pub fn is_response_msg(t: MessageType) -> bool {
     matches!(
         t,
@@ -188,7 +188,7 @@ impl Ready {
         self.number
     }
 
-    /// The current volatile state of a Node.
+    /// The current volatile v2state of a Node.
     /// SoftState will be None if there is no update.
     /// It is not required to consume or store SoftState.
     #[inline]
@@ -196,14 +196,14 @@ impl Ready {
         self.ss.as_ref()
     }
 
-    /// The current state of a Node to be saved to stable storage.
-    /// HardState will be None state if there is no update.
+    /// The current v2state of a Node to be saved to stable storage.
+    /// HardState will be None v2state if there is no update.
     #[inline]
     pub fn hs(&self) -> Option<&HardState> {
         self.hs.as_ref()
     }
 
-    /// ReadStates specifies the state for read only query.
+    /// ReadStates specifies the v2state for read only query.
     #[inline]
     pub fn read_states(&self) -> &Vec<ReadState> {
         &self.read_states
@@ -234,7 +234,7 @@ impl Ready {
     }
 
     /// CommittedEntries specifies entries to be committed to a
-    /// store/state-machine. These have previously been committed to stable
+    /// store/v2state-machine. These have previously been committed to stable
     /// store.
     #[inline]
     pub fn committed_entries(&self) -> &Vec<Entry> {
@@ -301,10 +301,10 @@ impl Ready {
     }
 }
 
-/// MustSync returns true if the hard state and count of Raft entries indicate
+/// MustSync returns true if the hard v2state and count of Raft entries indicate
 /// that a synchronous write to persistent storage is required.
 pub fn must_sync(st: HardState, pre_st: HardState, ents_num: usize) -> bool {
-    // Persistent state on all servers:
+    // Persistent v2state on all servers:
     // (Updated on stable storage before responding to RPCs)
     // currentTerm
     // votedFor
@@ -333,7 +333,7 @@ pub struct LightReady {
 
 impl LightReady {
     /// The current commit index.
-    /// It will be None state if there is no update.
+    /// It will be None v2state if there is no update.
     /// It is not required to save it to stable storage.
     #[inline]
     pub fn commit_index(&self) -> Option<u64> {
@@ -341,7 +341,7 @@ impl LightReady {
     }
 
     /// CommittedEntries specifies entries to be committed to a
-    /// store/state-machine. These have previously been committed to stable
+    /// store/v2state-machine. These have previously been committed to stable
     /// store.
     #[inline]
     pub fn committed_entries(&self) -> &Vec<Entry> {
@@ -371,7 +371,7 @@ impl LightReady {
 /// The methods of this struct correspond to the methods of Node and are described
 /// more fully there.
 pub struct RawNode<T: Storage> {
-    /// The internal raft state.
+    /// The internal raft v2state.
     pub raft: Raft<T>,
     prev_ss: SoftState,
     prev_hs: HardState,
@@ -429,7 +429,7 @@ impl<T: Storage> RawNode<T> {
         self.raft.tick()
     }
 
-    /// Campaign causes this RawNode to transition to candidate state.
+    /// Campaign causes this RawNode to transition to candidate v2state.
     pub fn campaign(&mut self) -> Result<()> {
         let mut m = Message::default();
         m.set_msg_type(MessageType::MsgHup);
@@ -457,9 +457,9 @@ impl<T: Storage> RawNode<T> {
 
     /// ProposeConfChange proposes a config change.
     ///
-    /// If the node enters joint state with `auto_leave` set to true, it's
+    /// If the node enters joint v2state with `auto_leave` set to true, it's
     /// caller's responsibility to propose an empty conf change again to force
-    /// leaving joint state.
+    /// leaving joint v2state.
     #[cfg_attr(feature = "cargo-clippy", allow(clippy::needless_pass_by_value))]
     pub fn propose_conf_change(&mut self, context: Vec<u8>, cc: impl ConfChangeI) -> Result<()> {
         let (data, ty) = if let Some(cc) = cc.as_v1() {
@@ -484,7 +484,7 @@ impl<T: Storage> RawNode<T> {
         self.raft.apply_conf_change(&cc.as_v2())
     }
 
-    /// Step advances the state machine using the given message.
+    /// Step advances the v2state machine using the given message.
     pub fn step(&mut self, m: Message) -> Result<()> {
         // Ignore unexpected local messages receiving over network
         if is_local_msg(m.get_msg_type()) {
@@ -558,7 +558,7 @@ impl<T: Storage> RawNode<T> {
     /// This includes appending and applying entries or a snapshot, updating the HardState,
     /// and sending messages. The returned `Ready` *MUST* be handled and subsequently
     /// passed back via `advance` or its families. Before that, *DO NOT* call any function like
-    /// `step`, `propose`, `campaign` to change internal state.
+    /// `step`, `propose`, `campaign` to change internal v2state.
     ///
     /// [`Self::has_ready`] should be called first to check if it's necessary to handle the ready.
     pub fn ready(&mut self) -> Ready {
@@ -644,7 +644,7 @@ impl<T: Storage> RawNode<T> {
     }
 
     // acceptReady is called when the consumer of the RawNode has decided to go
-    // ahead and handle a Ready. Nothing must alter the state of the RawNode between
+    // ahead and handle a Ready. Nothing must alter the v2state of the RawNode between
     // this call and the prior call to Ready().
     pub(crate) fn accept_ready(&mut self, ready: &Ready) {
         // info!("accept ready, {:?}", "{}",ready);
@@ -787,7 +787,7 @@ impl<T: Storage> RawNode<T> {
             assert!(hard_state.commit == self.prev_hs.commit);
             light_rd.commit_index = None;
         }
-        assert_eq!(hard_state, self.prev_hs, "hard state != prev_hs");
+        assert_eq!(hard_state, self.prev_hs, "hard v2state != prev_hs");
         light_rd
     }
 
@@ -862,10 +862,10 @@ impl<T: Storage> RawNode<T> {
         let _ = self.raft.step(m);
     }
 
-    /// ReadIndex requests a read state. The read state will be set in ready.
+    /// ReadIndex requests a read v2state. The read v2state will be set in ready.
     /// Read State has a read index. Once the application advances further than the read
     /// index, any linearizable read requests issued before the read request can be
-    /// processed safely. The read state will have the same rctx attached.
+    /// processed safely. The read v2state will have the same rctx attached.
     pub fn read_index(&mut self, rctx: Vec<u8>) {
         let mut m = Message::default();
         m.set_msg_type(MessageType::MsgReadIndex);

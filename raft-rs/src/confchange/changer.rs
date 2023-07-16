@@ -74,7 +74,7 @@ impl Changer<'_> {
         let (mut cfg, mut prs) = self.check_and_copy()?;
         if cfg.voters().incoming.is_empty() {
             // We allow adding nodes to an empty config for convenience (testing and
-            // bootstrap), but you can't enter a joint state.
+            // bootstrap), but you can't enter a joint v2state.
             return Err(Error::ConfChangeError(
                 "can't make a zero-voter config joint".to_owned(),
             ));
@@ -131,7 +131,7 @@ impl Changer<'_> {
     /// Carries out a series of configuration changes that (in aggregate) mutates the
     /// incoming majority config `Voters[0]` by at most one. This method will return an
     /// error if that is not the case, if the resulting quorum is zero, or if the
-    /// configuration is in a joint state (i.e. if there is an outgoing configuration).
+    /// configuration is in a joint v2state (i.e. if there is an outgoing configuration).
     pub fn simple(&mut self, ccs: &[ConfChangeSingle]) -> Result<(Configuration, MapChange)> {
         if super::joint(self.tracker.conf()) {
             return Err(Error::ConfChangeError(
@@ -158,7 +158,7 @@ impl Changer<'_> {
 
     /// Applies a change to the configuration. By convention, changes to voters are always
     /// made to the incoming majority config. Outgoing is either empty or preserves the
-    /// outgoing majority configuration while in a joint state.
+    /// outgoing majority configuration while in a joint v2state.
     fn apply(
         &self,
         cfg: &mut Configuration,

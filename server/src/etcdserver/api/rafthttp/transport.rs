@@ -1,9 +1,16 @@
 use std::env::Args;
-use actix_web::Handler;
+use actix::Handler;
+use actix_ratelimit::ActorMessage;
+use actix_web::{HttpServer};
 use raft::eraftpb::Message;
 use anyhow::Result;
 use raft::SnapshotStatus;
+
+
 use crate::etcdserver::api::rafthttp::snap::message::SnapMessage;
+use crate::etcdserver::api::rafthttp::snap::snap_shotter::SnapShotter;
+use crate::etcdserver::api::rafthttp::types::id::ID;
+use crate::etcdserver::api::rafthttp::types::urls::URLs;
 
 pub trait Raft{
     fn process(&self, m: Message) -> Result<()>;
@@ -14,7 +21,7 @@ pub trait Raft{
 
 pub trait Transporter{
     fn start(&self) -> Result<()>;
-    fn handle(&self);
+    // fn handle(&self) -> Result<HttpServer<F, I, S, B>>;
     fn send(&self, m:&[Message]) -> Result<()>;
     fn send_snapshot(&self, m: SnapMessage) -> Result<()>;
     fn add_remote(&self, id: u64, urls: Vec<String>) -> Result<()>;
@@ -25,4 +32,19 @@ pub trait Transporter{
     fn active_since(&self) ->  std::time::SystemTime;
     fn active_peers(&self) -> i64;
     fn stop(&self) -> Result<()>;
+}
+
+pub struct Transport{
+    logger : slog::Logger,
+
+    dial_timeout : std::time::Duration,
+    dial_retry_frequency : f64,
+
+    ID : ID,
+    URLS : URLs,
+    cluster_id : ID,
+    snap_shotter : SnapShotter,
+    // server
+
+
 }

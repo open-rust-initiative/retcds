@@ -260,20 +260,17 @@ impl<S: Storage + Send + Sync + 'static> InnerNode<'_,S> {
         select! {
             _= ch.send(props_msg) => {
                 if !wait{
-                    return Ok(())
+                    return Ok(());
                 }
             }
             _= self.done.recv() => {
-                return Err(RaftError::Stopped)
+                return Err(RaftError::Stopped);
             }
         }
         select! {
-            res = notify.recv() => {
-                return res.unwrap()
-            }
-            _= self.done.recv() => {
-                return Err(RaftError::Stopped)
-            }
+            res = notify.recv() =>return res.unwrap(),
+            _= self.done.recv() =>return Err(RaftError::Stopped)
+
         }
     }
 
@@ -339,7 +336,7 @@ pub trait Node {
     /// timeouts and heartbeat timeouts are in units of ticks.
     async fn tick(&self);
 
-    /// Causes the `Node` to transition to candidate state and start campaign to become leader.
+    /// Causes the `Node` to transition to candidate v2state and start campaign to become leader.
     async fn campaign(&self) -> SafeResult<()>;
 
     /// proposes that data be appended to the log. Note that proposals can be lost without
@@ -360,11 +357,11 @@ pub trait Node {
     /// usage details and semantics.
     async fn propose_conf_change(&self, cc: impl ConfChangeI + Send) -> SafeResult<()>;
 
-    /// Step advances the state machine using the given message. ctx.Err() will be returned, if any.
+    /// Step advances the v2state machine using the given message. ctx.Err() will be returned, if any.
     async fn step(&self, msg: Message) -> SafeResult<()>;
 
-    /// Ready returns a channel that returns the current point-in-time state.
-    /// Users of the Node must call Advance after retrieving the state returned by Ready.
+    /// Ready returns a channel that returns the current point-in-time v2state.
+    /// Users of the Node must call Advance after retrieving the v2state returned by Ready.
     ///
     /// NOTE: No committed entries from the next Ready may be applied until all committed entries
     /// and snapshots from the previous one have finished.
@@ -394,13 +391,13 @@ pub trait Node {
     /// TransferLeadership attempts to transfer leadership to the given transferee.
     async fn transfer_leader_ship(&self, lead: u64, transferee: u64);
 
-    /// ReadIndex request a read state. The read state will be set in the ready.
-    /// Read state has a read index. Once the application advances further than the read
+    /// ReadIndex request a read v2state. The read v2state will be set in the ready.
+    /// Read v2state has a read index. Once the application advances further than the read
     /// index, any linearize read requests issued before the read request can be
-    /// processed safely. The read state will have the same rctx attached.
+    /// processed safely. The read v2state will have the same rctx attached.
     async fn read_index(&self, rctx: Vec<u8>) -> SafeResult<()>;
 
-    /// Status returns the current status of the raft state machine.
+    /// Status returns the current status of the raft v2state machine.
     async fn status(&self) -> Status;
 
     /// reports the given node is not reachable for the last send.
@@ -411,7 +408,7 @@ pub trait Node {
     /// Calling `ReportSnapshot` with `SnapshotFinish` is a no-op. But, any failure in applying a
     /// snapshot (for e.g., while streaming it from leader to follower), should be reported to the
     /// leader with SnapshotFailure. When leader sends a snapshot to a follower, it pauses any raft
-    /// log probes until the follower can apply the snapshot and advance its state. If the follower
+    /// log probes until the follower can apply the snapshot and advance its v2state. If the follower
     /// can't do that, for e.g., due to a crash, it could end up in a limbo, never getting any
     /// updates from the leader. Therefore, it is crucial that the application ensures that any
     /// failure in snapshot sending is caught and reported back to the leader; so it can resume raft
@@ -565,7 +562,7 @@ impl<S: Storage + Send + Sync + 'static> Node for InnerNode<'_,S>{
             },
             _= self.done.recv() => {
                 // info!(LOGGER,"run 4");
-                return;
+                return
             }
         }
         // info!(LOGGER,"run 5");
@@ -780,15 +777,8 @@ mod tests {
         let w_request = "somedata2".as_bytes().to_vec();
         node.read_index(w_request.clone());
         assert!(node.propose("somedata".as_bytes()).await.is_ok());
-        // println!("is");
-        // dbg!(x);
         node.stop().await;
     }
 
-    #[tokio::test]
-    async fn test_start_node() {
 
-
-
-    }
 }

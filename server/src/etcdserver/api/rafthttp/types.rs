@@ -1,11 +1,10 @@
 use slog::o;
-
-pub mod message;
-mod db;
-pub mod snap_shotter;
 use slog::Drain;
+pub mod id;
+pub mod urls;
+
 #[allow(dead_code)]
-fn default_logger() -> slog::Logger {
+pub fn default_logger() -> slog::Logger {
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();

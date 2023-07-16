@@ -60,9 +60,9 @@ impl<'a> Status<'a> {
 pub struct BaseStatus<'a> {
     /// The ID of the current node.
     pub id: u64,
-    /// The hardstate of the raft, representing voted state.
+    /// The hardstate of the raft, representing voted v2state.
     pub hs: HardState,
-    /// The softstate of the raft, representing proposed state.
+    /// The softstate of the raft, representing proposed v2state.
     pub ss: SoftState,
     /// The index of the last entry to have been applied.
     pub applied: u64,

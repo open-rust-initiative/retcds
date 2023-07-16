@@ -3,7 +3,6 @@ use std::rc;
 use actix_web::dev::ServerHandle;
 // use actix_web::dev::Server;
 use futures::SinkExt;
-use http::header::SERVER;
 use raft::eraftpb::Message;
 use crate::etcdserver::api::rafthttp::error::Error;
 use crate::etcdserver::api::rafthttp::util::read_closer::{ExactReaderCloser};

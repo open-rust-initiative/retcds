@@ -79,7 +79,7 @@ fn assert_raft_log(
     );
 }
 
-// voted_with_config creates a raft state machine with vote and term set
+// voted_with_config creates a raft v2state machine with vote and term set
 // to the given value but no log entries (indicating that it voted in
 // the given term but has not receive any logs).
 fn voted_with_config(
@@ -379,7 +379,7 @@ fn test_progress_flow_control() {
     // Throw away all the messages relating to the initial election.
     r.read_messages();
 
-    // While node 2 is in probe state, propose a bunch of entries.
+    // While node 2 is in probe v2state, propose a bunch of entries.
     r.mut_prs().get_mut(2).unwrap().become_probe();
     let data: String = "a".repeat(1000);
     for _ in 0..10 {
@@ -395,14 +395,14 @@ fn test_progress_flow_control() {
     let mut ms = r.read_messages();
     // First append has two entries: the empty entry to confirm the
     // election, and the first proposal (only one proposal gets sent
-    // because we're in probe state).
+    // because we're in probe v2state).
     assert_eq!(ms.len(), 1);
     assert_eq!(ms[0].msg_type, MessageType::MsgAppend);
     assert_eq!(ms[0].entries.len(), 2);
     assert_eq!(ms[0].entries[0].data.len(), 0);
     assert_eq!(ms[0].entries[1].data.len(), 1000);
 
-    // When this append is acked, we change to replicate state and can
+    // When this append is acked, we change to replicate v2state and can
     // send multiple messages at once.
     let mut msg = new_message(2, 1, MessageType::MsgAppendResponse, 0);
     msg.index = ms[0].entries[1].index;
@@ -509,14 +509,14 @@ fn test_leader_election_with_config(pre_vote: bool, l: &Logger) {
         let raft = &network.peers[&1];
         let (exp_state, exp_term) = if state == StateRole::Candidate && pre_vote {
             // In pre-vote mode, an election that fails to complete
-            // leaves the node in pre-candidate state without advancing
+            // leaves the node in pre-candidate v2state without advancing
             // the term.
             (StateRole::PreCandidate, 0)
         } else {
             (state, term)
         };
         if raft.state != exp_state {
-            panic!("#{}: state = {:?}, want {:?}", i, raft.state, exp_state);
+            panic!("#{}: v2state = {:?}, want {:?}", i, raft.state, exp_state);
         }
         if raft.term != exp_term {
             panic!("#{}: term = {}, want {}", i, raft.term, exp_term)
@@ -538,7 +538,7 @@ fn test_leader_cycle_pre_vote() {
 
 // test_leader_cycle verifies that each node in a cluster can campaign
 // and be elected in turn. This ensures that elections (including
-// pre-vote) work when not starting from a clean state (as they do in
+// pre-vote) work when not starting from a clean v2state (as they do in
 // test_leader_election)
 fn test_leader_cycle_with_config(pre_vote: bool, l: &Logger) {
     let mut config = Network::default_config();
@@ -555,12 +555,12 @@ fn test_leader_cycle_with_config(pre_vote: bool, l: &Logger) {
         for sm in network.peers.values() {
             if sm.id == campaigner_id && sm.state != StateRole::Leader {
                 panic!(
-                    "pre_vote={}: campaigning node {} state = {:?}, want Leader",
+                    "pre_vote={}: campaigning node {} v2state = {:?}, want Leader",
                     pre_vote, sm.id, sm.state
                 );
             } else if sm.id != campaigner_id && sm.state != StateRole::Follower {
                 panic!(
-                    "pre_vote={}: after campaign of node {}, node {} had state = {:?}, want \
+                    "pre_vote={}: after campaign of node {}, node {} had v2state = {:?}, want \
                      Follower",
                     pre_vote, campaigner_id, sm.id, sm.state
                 );
@@ -685,7 +685,7 @@ fn test_vote_from_any_state_for_type(vt: MessageType, l: &Logger) {
                 r.become_leader();
             }
         }
-        // Note that setting our state above may have advanced r.term
+        // Note that setting our v2state above may have advanced r.term
         // past its initial value.
         let orig_term = r.term;
         let new_term = r.term + 1;
@@ -717,12 +717,12 @@ fn test_vote_from_any_state_for_type(vt: MessageType, l: &Logger) {
         );
         assert!(!resp.reject, "{:?},{:?}: unexpected rejection", vt, state);
 
-        // If this was a real vote, we reset our state and term.
+        // If this was a real vote, we reset our v2state and term.
         if vt == MessageType::MsgRequestVote {
             assert_eq!(
                 r.state,
                 StateRole::Follower,
-                "{:?},{:?}, state {:?}, want {:?}",
+                "{:?},{:?}, v2state {:?}, want {:?}",
                 vt,
                 state,
                 r.state,
@@ -738,7 +738,7 @@ fn test_vote_from_any_state_for_type(vt: MessageType, l: &Logger) {
             // In a pre-vote, nothing changes.
             assert_eq!(
                 r.state, state,
-                "{:?},{:?}, state {:?}, want {:?}",
+                "{:?},{:?}, v2state {:?}, want {:?}",
                 vt, state, r.state, state
             );
             assert_eq!(
@@ -746,7 +746,7 @@ fn test_vote_from_any_state_for_type(vt: MessageType, l: &Logger) {
                 "{:?},{:?}, term {}, want {}",
                 vt, state, r.term, orig_term
             );
-            // If state == Follower or PreCandidate, r hasn't voted yet.
+            // If v2state == Follower or PreCandidate, r hasn't voted yet.
             // In Candidate or Leader, it's voted for itself.
             assert!(
                 r.vote == INVALID_ID || r.vote == 1,
@@ -928,7 +928,7 @@ fn test_dueling_candidates() {
         let id = i as u64 + 1;
         if nt.peers[&id].state != state {
             panic!(
-                "#{}: state = {:?}, want {:?}",
+                "#{}: v2state = {:?}, want {:?}",
                 i, nt.peers[&id].state, state
             );
         }
@@ -977,7 +977,7 @@ fn test_dueling_pre_candidates() {
     for (i, &(id, state, term, raft_log)) in tests.iter().enumerate() {
         if nt.peers[&id].state != state {
             panic!(
-                "#{}: state = {:?}, want {:?}",
+                "#{}: v2state = {:?}, want {:?}",
                 i, nt.peers[&id].state, state
             );
         }
@@ -1385,7 +1385,7 @@ fn test_handle_heartbeat() {
         }
         if m[0].get_msg_type() != MessageType::MsgHeartbeatResponse {
             panic!(
-                "#{}: type = {:?}, want MsgHeartbeatResponse",
+                "#{}: types = {:?}, want MsgHeartbeatResponse",
                 i,
                 m[0].get_msg_type()
             );
@@ -1507,8 +1507,8 @@ fn test_msg_append_response_wait_reset() {
     sm.step(m).expect("");
     sm.persist();
 
-    // The command is broadcast to all nodes not in the wait state.
-    // Node 2 left the wait state due to its MsgAppResp, but node 3 is still waiting.
+    // The command is broadcast to all nodes not in the wait v2state.
+    // Node 2 left the wait v2state due to its MsgAppResp, but node 3 is still waiting.
     let mut msgs = sm.read_messages();
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0].get_msg_type(), MessageType::MsgAppend);
@@ -1589,7 +1589,7 @@ fn test_recv_msg_request_vote_for_type(msg_type: MessageType, l: &Logger) {
         }
         if msgs[0].get_msg_type() != vote_resp_msg_type(msg_type) {
             panic!(
-                "#{}: m.type = {:?}, want {:?}",
+                "#{}: m.types = {:?}, want {:?}",
                 j,
                 msgs[0].get_msg_type(),
                 vote_resp_msg_type(msg_type)
@@ -1721,7 +1721,7 @@ fn test_state_transition() {
 fn test_all_server_stepdown() {
     let l = default_logger();
     let mut tests = vec![
-        // state, want_state, term, last_index, entry count.
+        // v2state, want_state, term, last_index, entry count.
         (StateRole::Follower, StateRole::Follower, 3, 0, 0),
         (StateRole::PreCandidate, StateRole::Follower, 3, 0, 0),
         (StateRole::Candidate, StateRole::Follower, 3, 0, 0),
@@ -1750,7 +1750,7 @@ fn test_all_server_stepdown() {
             sm.step(m).expect("");
 
             if sm.state != wstate {
-                panic!("{}.{} state = {:?}, want {:?}", i, j, sm.state, wstate);
+                panic!("{}.{} v2state = {:?}, want {:?}", i, j, sm.state, wstate);
             }
             if sm.term != wterm {
                 panic!("{}.{} term = {}, want {}", i, j, sm.term, wterm);
@@ -1958,7 +1958,7 @@ fn test_leader_election_with_check_quorum() {
     assert_eq!(nt.peers[&3].state, StateRole::Follower);
 
     // need to reset randomizedElectionTimeout larger than electionTimeout again,
-    // because the value might be reset to electionTimeout since the last state changes
+    // because the value might be reset to electionTimeout since the last v2state changes
     let a_election_timeout = nt.peers[&1].election_timeout();
     let b_election_timeout = nt.peers[&2].election_timeout();
     nt.peers
@@ -2102,7 +2102,7 @@ fn test_disruptive_follower() {
     let mut nt = Network::new(vec![Some(n1), Some(n2), Some(n3)], &l);
     nt.send(vec![new_message(1, 1, MessageType::MsgHup, 0)]);
 
-    // check state
+    // check v2state
     assert_eq!(nt.peers[&1].state, StateRole::Leader);
     assert_eq!(nt.peers[&2].state, StateRole::Follower);
     assert_eq!(nt.peers[&3].state, StateRole::Follower);
@@ -2130,7 +2130,7 @@ fn test_disruptive_follower() {
 
     // n1 is still leader yet
     // while its heartbeat to candidate n3 is being delayed
-    // check state
+    // check v2state
     assert_eq!(nt.peers[&1].state, StateRole::Leader);
     assert_eq!(nt.peers[&2].state, StateRole::Follower);
     assert_eq!(nt.peers[&3].state, StateRole::Candidate);
@@ -2156,7 +2156,7 @@ fn test_disruptive_follower() {
     // this is to disrupt the current leader, so that candidate
     // with higher term can be freed with following election
 
-    // check state
+    // check v2state
     assert_eq!(nt.peers[&1].state, StateRole::Follower);
     assert_eq!(nt.peers[&2].state, StateRole::Follower);
     assert_eq!(nt.peers[&3].state, StateRole::Candidate);
@@ -2193,7 +2193,7 @@ fn test_disruptive_follower_pre_vote() {
     let mut nt = Network::new(vec![Some(n1), Some(n2), Some(n3)], &l);
     nt.send(vec![new_message(1, 1, MessageType::MsgHup, 0)]);
 
-    // check state
+    // check v2state
     assert_eq!(nt.peers[&1].state, StateRole::Leader);
     assert_eq!(nt.peers[&2].state, StateRole::Follower);
     assert_eq!(nt.peers[&3].state, StateRole::Follower);
@@ -2206,7 +2206,7 @@ fn test_disruptive_follower_pre_vote() {
     nt.recover();
     nt.send(vec![new_message(3, 3, MessageType::MsgHup, 0)]);
 
-    // check state
+    // check v2state
     assert_eq!(nt.peers[&1].state, StateRole::Leader);
     assert_eq!(nt.peers[&2].state, StateRole::Follower);
     assert_eq!(nt.peers[&3].state, StateRole::PreCandidate);
@@ -2678,7 +2678,7 @@ fn test_leader_append_response() {
 #[test]
 fn test_bcast_beat() {
     let l = default_logger();
-    // make a state machine with log.offset = 1000
+    // make a v2state machine with log.offset = 1000
     let offset = 1000u64;
     let s = new_snapshot(offset, 1, vec![1, 2, 3]);
     let store = new_storage();
@@ -2721,7 +2721,7 @@ fn test_bcast_beat() {
     for (i, m) in msgs.drain(..).enumerate() {
         if m.get_msg_type() != MessageType::MsgHeartbeat {
             panic!(
-                "#{}: type = {:?}, want = {:?}",
+                "#{}: types = {:?}, want = {:?}",
                 i,
                 m.get_msg_type(),
                 MessageType::MsgHeartbeat
@@ -2778,7 +2778,7 @@ fn test_recv_msg_beat() {
         for m in msgs {
             if m.get_msg_type() != MessageType::MsgHeartbeat {
                 panic!(
-                    "#{}: msg.type = {:?}, want {:?}",
+                    "#{}: msg.types = {:?}, want {:?}",
                     i,
                     m.get_msg_type(),
                     MessageType::MsgHeartbeat
@@ -2793,14 +2793,14 @@ fn test_leader_increase_next() {
     let l = default_logger();
     let previous_ents = vec![empty_entry(1, 1), empty_entry(1, 2), empty_entry(1, 3)];
     let mut tests = vec![
-        // state replicate; optimistically increase next
+        // v2state replicate; optimistically increase next
         // previous entries + noop entry + propose + 1
         (
             ProgressState::Replicate,
             2,
             previous_ents.len() as u64 + 1 + 1 + 1,
         ),
-        // state probe, not optimistically increase next
+        // v2state probe, not optimistically increase next
         (ProgressState::Probe, 2, 2),
     ];
     for (i, (state, next_idx, wnext)) in tests.drain(..).enumerate() {
@@ -2918,7 +2918,7 @@ fn test_recv_msg_unreachable() {
     r.become_candidate();
     r.become_leader();
     r.read_messages();
-    // set node 2 to state replicate
+    // set node 2 to v2state replicate
     r.mut_prs().get_mut(2).unwrap().matched = 3;
     r.mut_prs().get_mut(2).unwrap().become_replicate();
     r.mut_prs().get_mut(2).unwrap().optimistic_update(5);
@@ -2977,7 +2977,7 @@ fn test_restore_ignore_snapshot() {
 #[test]
 fn test_provide_snap() {
     let l = default_logger();
-    // restore the state machine from a snapshot so it has a compacted log and a snapshot
+    // restore the v2state machine from a snapshot so it has a compacted log and a snapshot
     let s = new_snapshot(11, 11, vec![1, 2]); // magic number
 
     let mut sm = new_test_raft(1, vec![1], 10, 1, new_storage(), &l);
@@ -3002,7 +3002,7 @@ fn test_provide_snap() {
 #[test]
 fn test_ignore_providing_snapshot() {
     let l = default_logger();
-    // restore the state machine from a snapshot so it has a compacted log and a snapshot
+    // restore the v2state machine from a snapshot so it has a compacted log and a snapshot
     let s = new_snapshot(11, 11, vec![1, 2]); // magic number
     let mut sm = new_test_raft(1, vec![1], 10, 1, new_storage(), &l);
     sm.restore(s);
@@ -3079,7 +3079,7 @@ fn test_slow_node_restore() {
     );
 }
 
-// test_step_config tests that when raft step msgProp in EntryConfChange type,
+// test_step_config tests that when raft step msgProp in EntryConfChange types,
 // it appends the entry to log and sets pendingConf to be true.
 #[test]
 fn test_step_config() {
@@ -3098,8 +3098,8 @@ fn test_step_config() {
 }
 
 // test_step_ignore_config tests that if raft step the second msgProp in
-// EntryConfChange type when the first one is uncommitted, the node will set
-// the proposal to noop and keep its original state.
+// EntryConfChange types when the first one is uncommitted, the node will set
+// the proposal to noop and keep its original v2state.
 #[test]
 fn test_step_ignore_config() {
     let l = default_logger();
@@ -3278,7 +3278,7 @@ fn test_campaign_while_leader_with_pre_vote(pre_vote: bool, l: &Logger) {
     let mut r = new_test_raft_with_prevote(1, vec![1], 5, 1, new_storage(), pre_vote, l);
     assert_eq!(r.state, StateRole::Follower);
     // We don't call campaign() directly because it comes after the check
-    // for our current state.
+    // for our current v2state.
     r.step(new_message(1, 1, MessageType::MsgHup, 0)).expect("");
     assert_eq!(r.state, StateRole::Leader);
     let term = r.term;
@@ -3680,7 +3680,7 @@ fn test_leader_transfer_second_transfer_to_same_node() {
 fn check_leader_transfer_state(r: &Raft<MemStorage>, state: StateRole, lead: u64) {
     if r.state != state || r.leader_id != lead {
         panic!(
-            "after transferring, node has state {:?} lead {}, want state {:?} lead {}",
+            "after transferring, node has v2state {:?} lead {}, want v2state {:?} lead {}",
             r.state, r.leader_id, state, lead
         );
     }
@@ -3746,7 +3746,7 @@ fn test_node_with_smaller_term_can_complete_election() {
     assert_eq!(nt.peers[&2].term, 3);
     assert_eq!(nt.peers[&3].term, 1);
 
-    // check state
+    // check v2state
     // a == follower
     // b == leader
     // c == pre-candidate
@@ -4105,7 +4105,7 @@ fn test_remove_learner() -> Result<()> {
 // simulate rolling update a cluster for Pre-Vote. cluster has 3 nodes [n1, n2, n3].
 // n1 is leader with term 2
 // n2 is follower with term 2
-// n3 is partitioned, with term 4 and less log, state is candidate
+// n3 is partitioned, with term 4 and less log, v2state is candidate
 fn new_prevote_migration_cluster(l: &Logger) -> Network {
     // We intentionally do not enable pre_vote for n3, this is done so in order
     // to simulate a rolling restart process where it's possible to have a mixed
@@ -4129,10 +4129,10 @@ fn new_prevote_migration_cluster(l: &Logger) -> Network {
     nt.send(vec![new_message(3, 3, MessageType::MsgHup, 0)]);
     nt.send(vec![new_message(3, 3, MessageType::MsgHup, 0)]);
 
-    // check state
-    // n1.state == Leader
-    // n2.state == Follower
-    // n3.state == Candidate
+    // check v2state
+    // n1.v2state == Leader
+    // n2.v2state == Follower
+    // n3.v2state == Candidate
     assert_eq!(nt.peers[&1].state, StateRole::Leader);
     assert_eq!(nt.peers[&2].state, StateRole::Follower);
     assert_eq!(nt.peers[&3].state, StateRole::Candidate);
@@ -4167,9 +4167,9 @@ fn test_prevote_migration_can_complete_election() {
     nt.send(vec![new_message(3, 3, MessageType::MsgHup, 0)]);
     nt.send(vec![new_message(2, 2, MessageType::MsgHup, 0)]);
 
-    // check state
-    // n2.state == Follower
-    // n3.state == PreCandidate
+    // check v2state
+    // n2.v2state == Follower
+    // n3.v2state == PreCandidate
     assert_eq!(nt.peers[&2].state, StateRole::Follower);
     assert_eq!(nt.peers[&3].state, StateRole::PreCandidate);
 
@@ -4309,16 +4309,16 @@ fn test_prevote_with_split_vote() {
     assert_eq!(network.peers[&2].term, 3, "peer 2 term",);
     assert_eq!(network.peers[&3].term, 3, "peer 3 term",);
 
-    // check state
+    // check v2state
     assert_eq!(
         network.peers[&2].state,
         StateRole::Candidate,
-        "peer 2 state",
+        "peer 2 v2state",
     );
     assert_eq!(
         network.peers[&3].state,
         StateRole::Candidate,
-        "peer 3 state",
+        "peer 3 v2state",
     );
 
     // node 2 election timeout first
@@ -4328,9 +4328,9 @@ fn test_prevote_with_split_vote() {
     assert_eq!(network.peers[&2].term, 4, "peer 2 term",);
     assert_eq!(network.peers[&3].term, 4, "peer 3 term",);
 
-    // check state
-    assert_eq!(network.peers[&2].state, StateRole::Leader, "peer 2 state",);
-    assert_eq!(network.peers[&3].state, StateRole::Follower, "peer 3 state",);
+    // check v2state
+    assert_eq!(network.peers[&2].state, StateRole::Leader, "peer 2 v2state",);
+    assert_eq!(network.peers[&3].state, StateRole::Follower, "peer 3 v2state",);
 }
 
 // ensure that after a node become pre-candidate, it will checkQuorum correctly.
@@ -4355,15 +4355,15 @@ fn test_prevote_with_check_quorum() {
     network.cut(1, 3);
     network.cut(2, 3);
 
-    assert_eq!(network.peers[&1].state, StateRole::Leader, "peer 1 state",);
-    assert_eq!(network.peers[&2].state, StateRole::Follower, "peer 2 state",);
+    assert_eq!(network.peers[&1].state, StateRole::Leader, "peer 1 v2state",);
+    assert_eq!(network.peers[&2].state, StateRole::Follower, "peer 2 v2state",);
 
     network.send(vec![new_message(3, 3, MessageType::MsgHup, 0)]);
 
     assert_eq!(
         network.peers[&3].state,
         StateRole::PreCandidate,
-        "peer 3 state",
+        "peer 3 v2state",
     );
 
     // term + 2, so that node 2 will ignore node 3's PreVote
@@ -4375,13 +4375,13 @@ fn test_prevote_with_check_quorum() {
     assert_eq!(network.peers[&2].term, 4, "peer 2 term",);
     assert_eq!(network.peers[&3].term, 2, "peer 3 term",);
 
-    // check state
-    assert_eq!(network.peers[&1].state, StateRole::Leader, "peer 1 state",);
-    assert_eq!(network.peers[&2].state, StateRole::Follower, "peer 2 state",);
+    // check v2state
+    assert_eq!(network.peers[&1].state, StateRole::Leader, "peer 1 v2state",);
+    assert_eq!(network.peers[&2].state, StateRole::Follower, "peer 2 v2state",);
     assert_eq!(
         network.peers[&3].state,
         StateRole::PreCandidate,
-        "peer 3 state",
+        "peer 3 v2state",
     );
 
     // recover the network then immediately isolate node 1 which is currently
@@ -4397,9 +4397,9 @@ fn test_prevote_with_check_quorum() {
     }
     network.send(vec![new_message(2, 2, MessageType::MsgHup, 0)]);
 
-    // check state
-    assert_eq!(network.peers[&2].state, StateRole::Leader, "peer 2 state",);
-    assert_eq!(network.peers[&3].state, StateRole::Follower, "peer 3 state",);
+    // check v2state
+    assert_eq!(network.peers[&2].state, StateRole::Leader, "peer 2 v2state",);
+    assert_eq!(network.peers[&3].state, StateRole::Follower, "peer 3 v2state",);
 }
 
 // ensure a new Raft returns a Error::ConfigInvalid with an invalid config
@@ -4580,7 +4580,7 @@ fn test_advance_commit_index_by_vote_request(use_prevote: bool) {
             p4.tick();
         }
         if p4.state != StateRole::Follower {
-            panic!("#{} node 4 state: {:?}, want Follower", i, p4.state);
+            panic!("#{} node 4 v2state: {:?}, want Follower", i, p4.state);
         }
         let p2 = nt.peers.get_mut(&2).unwrap();
         if p2.raft_log.committed < cc_index {
@@ -4602,7 +4602,7 @@ fn test_advance_commit_index_by_vote_request(use_prevote: bool) {
             StateRole::Candidate
         };
         if p2.state != want {
-            panic!("#{} node 2 state: {:?}, want {:?}", i, p2.state, want);
+            panic!("#{} node 2 v2state: {:?}, want {:?}", i, p2.state, want);
         }
         let msgs = nt.read_messages();
         nt.filter_and_send(msgs);
@@ -4628,7 +4628,7 @@ fn test_advance_commit_index_by_vote_request(use_prevote: bool) {
         let msgs = nt.read_messages();
         nt.filter_and_send(msgs);
         if nt.peers[&4].state != StateRole::Leader {
-            panic!("#{} node 4 state: {:?} want Leader", i, nt.peers[&4].state);
+            panic!("#{} node 4 v2state: {:?} want Leader", i, nt.peers[&4].state);
         }
     }
 }
@@ -4731,7 +4731,7 @@ fn test_advance_commit_index_by_vote_response(use_prevote: bool) {
             p4.tick();
         }
         if p4.state != StateRole::Follower {
-            panic!("#{} node 4 state: {:?}, want Follower", i, p4.state);
+            panic!("#{} node 4 v2state: {:?}, want Follower", i, p4.state);
         }
         let p2 = nt.peers.get_mut(&2).unwrap();
         if p2.raft_log.committed >= cc_index {
@@ -4751,7 +4751,7 @@ fn test_advance_commit_index_by_vote_response(use_prevote: bool) {
             StateRole::Candidate
         };
         if p2.state != want {
-            panic!("#{} node 2 state: {:?}, want {:?}", i, p2.state, want);
+            panic!("#{} node 2 v2state: {:?}, want {:?}", i, p2.state, want);
         }
         let msgs = nt.read_messages();
         nt.filter_and_send(msgs);
@@ -4780,7 +4780,7 @@ fn test_advance_commit_index_by_vote_response(use_prevote: bool) {
         let msgs = nt.read_messages();
         nt.filter_and_send(msgs);
         if nt.peers[&2].state != StateRole::Leader {
-            panic!("#{} node 2 state: {:?} want Leader", i, nt.peers[&2].state);
+            panic!("#{} node 2 v2state: {:?} want Leader", i, nt.peers[&2].state);
         }
     }
 }
@@ -4917,7 +4917,7 @@ fn test_request_snapshot_unavailable() {
         req_snap
     );
 
-    // Peer 2 is still in probe state due to SnapshotTemporarilyUnavailable.
+    // Peer 2 is still in probe v2state due to SnapshotTemporarilyUnavailable.
     nt.peers[&1].store().wl().trigger_snap_unavailable();
     nt.peers
         .get_mut(&1)
@@ -5212,7 +5212,7 @@ fn test_group_commit_consistent() {
             StateRole::Leader,
             Some(false),
         ),
-        // Only leader knows what's the current state.
+        // Only leader knows what's the current v2state.
         (
             vec![8, 2, 6],
             vec![1, 1, 2],
@@ -5287,7 +5287,7 @@ fn test_group_commit_consistent() {
 #[test]
 fn test_election_with_priority_log() {
     let tests = vec![
-        // log is up to date or not 1..3, priority 1..3, id, state
+        // log is up to date or not 1..3, priority 1..3, id, v2state
         (true, false, false, 3, 1, 1, 1, StateRole::Leader),
         (true, false, false, 2, 2, 2, 1, StateRole::Leader),
         (true, false, false, 1, 3, 3, 1, StateRole::Leader),
@@ -5346,11 +5346,11 @@ fn test_election_after_change_priority() {
 
     assert_eq!(network.peers[&1].priority, 0, "peer 1 priority");
     network.send(vec![new_message(1, 1, MessageType::MsgHup, 0)]);
-    // check state
-    assert_eq!(network.peers[&1].state, StateRole::Follower, "peer 1 state");
+    // check v2state
+    assert_eq!(network.peers[&1].state, StateRole::Follower, "peer 1 v2state");
 
     let tests = vec![
-        (1, 1, StateRole::Follower), //id, priority, state
+        (1, 1, StateRole::Follower), //id, priority, v2state
         (1, 2, StateRole::Leader),
         (1, 3, StateRole::Leader),
         (1, 0, StateRole::Follower),
@@ -5365,8 +5365,8 @@ fn test_election_after_change_priority() {
         network.peers.get_mut(&id).unwrap().set_priority(p);
         network.send(vec![new_message(id, id, MessageType::MsgHup, 0)]);
 
-        // check state
-        assert_eq!(network.peers[&id].state, state, "peer {} state", id);
+        // check v2state
+        assert_eq!(network.peers[&id].state, state, "peer {} v2state", id);
     }
 }
 
@@ -5564,8 +5564,8 @@ fn test_uncommitted_state_advance_ready_from_last_term() {
 fn test_fast_log_rejection() {
     let mut tests = vec![
         // This case tests that leader can find the conflict index quickly.
-        // Firstly leader appends (type=MsgApp,index=7,logTerm=4, entries=...);
-        // After rejected leader appends (type=MsgApp,index=3,logTerm=2).
+        // Firstly leader appends (types=MsgApp,index=7,logTerm=4, entries=...);
+        // After rejected leader appends (types=MsgApp,index=3,logTerm=2).
         (
             vec![
                 empty_entry(1, 1),
@@ -5595,8 +5595,8 @@ fn test_fast_log_rejection() {
             3,
         ),
         // This case tests that leader can find the conflict index quickly.
-        // Firstly leader appends (type=MsgApp,index=8,logTerm=5, entries=...);
-        // After rejected leader appends (type=MsgApp,index=4,logTerm=3).
+        // Firstly leader appends (types=MsgApp,index=8,logTerm=5, entries=...);
+        // After rejected leader appends (types=MsgApp,index=4,logTerm=3).
         (
             vec![
                 empty_entry(1, 1),
@@ -5627,8 +5627,8 @@ fn test_fast_log_rejection() {
             4,
         ),
         // This case tests that follower can find the conflict index quickly.
-        // Firstly leader appends (type=MsgApp,index=4,logTerm=1, entries=...);
-        // After rejected leader appends (type=MsgApp,index=1,logTerm=1).
+        // Firstly leader appends (types=MsgApp,index=4,logTerm=1, entries=...);
+        // After rejected leader appends (types=MsgApp,index=1,logTerm=1).
         (
             vec![
                 empty_entry(1, 1),
@@ -5649,8 +5649,8 @@ fn test_fast_log_rejection() {
         ),
         // This case is similar to the previous case. However, this time, the
         // leader has a longer uncommitted log tail than the follower.
-        // Firstly leader appends (type=MsgApp,index=6,logTerm=1, entries=...);
-        // After rejected leader appends (type=MsgApp,index=1,logTerm=1).
+        // Firstly leader appends (types=MsgApp,index=6,logTerm=1, entries=...);
+        // After rejected leader appends (types=MsgApp,index=1,logTerm=1).
         (
             vec![
                 empty_entry(1, 1),
@@ -5673,8 +5673,8 @@ fn test_fast_log_rejection() {
         ),
         // This case is similar to the previous case. However, this time, the
         // follower has a longer uncommitted log tail than the leader.
-        // Firstly leader appends (type=MsgApp,index=4,logTerm=1, entries=...);
-        // After rejected leader appends (type=MsgApp,index=1,logTerm=1).
+        // Firstly leader appends (types=MsgApp,index=4,logTerm=1, entries=...);
+        // After rejected leader appends (types=MsgApp,index=1,logTerm=1).
         (
             vec![
                 empty_entry(1, 1),
@@ -5696,8 +5696,8 @@ fn test_fast_log_rejection() {
             1,
         ),
         // An normal case that there are no log conflicts.
-        // Firstly leader appends (type=MsgApp,index=5,logTerm=5, entries=...);
-        // After rejected leader appends (type=MsgApp,index=4,logTerm=4).
+        // Firstly leader appends (types=MsgApp,index=5,logTerm=5, entries=...);
+        // After rejected leader appends (types=MsgApp,index=4,logTerm=4).
         (
             vec![
                 empty_entry(1, 1),

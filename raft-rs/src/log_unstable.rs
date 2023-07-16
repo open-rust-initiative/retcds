@@ -1,4 +1,4 @@
-//! A representation of not-yet-committed log entries and state.
+//! A representation of not-yet-committed log entries and v2state.
 
 // Copyright 2019 TiKV Project Authors. Licensed under Apache-2.0.
 
