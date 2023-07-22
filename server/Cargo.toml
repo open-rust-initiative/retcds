@@ -46,3 +46,4 @@ openssl = "0.10"
 actix = "0.13"
 #time = "0.3"
 chrono = "0.4"
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }

@@ -6,11 +6,12 @@ use raft::eraftpb::Message;
 use anyhow::Result;
 use raft::SnapshotStatus;
 
-
 use crate::etcdserver::api::rafthttp::snap::message::SnapMessage;
 use crate::etcdserver::api::rafthttp::snap::snap_shotter::SnapShotter;
 use crate::etcdserver::api::rafthttp::types::id::ID;
 use crate::etcdserver::api::rafthttp::types::urls::URLs;
+use crate::etcdserver::api::rafthttp::v2state::leader::LeaderStats;
+use crate::etcdserver::api::rafthttp::v2state::server::ServerState;
 
 pub trait Raft{
     fn process(&self, m: Message) -> Result<()>;
@@ -44,7 +45,11 @@ pub struct Transport{
     URLS : URLs,
     cluster_id : ID,
     snap_shotter : SnapShotter,
-    // server
+
+    server_stats : ServerState,
+
+    leader_stats : LeaderStats,
+
 
 
 }

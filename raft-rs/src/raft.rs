@@ -26,6 +26,7 @@ use protobuf::Message as _;
 use raft_proto::ConfChangeI;
 use rand::{self, Rng};
 use slog::{self, Logger};
+use serde::{Serialize,Deserialize};
 
 #[cfg(feature = "failpoints")]
 use fail::fail_point;
@@ -60,7 +61,7 @@ pub const CAMPAIGN_TRANSFER: &[u8] = b"CampaignTransfer";
 pub const NONE: u64 = 0;
 
 /// The role of the node.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy,Serialize,Deserialize)]
 pub enum StateRole {
     /// The node is a follower of the leader.
     Follower,
