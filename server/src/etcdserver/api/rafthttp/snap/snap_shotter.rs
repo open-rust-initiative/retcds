@@ -11,7 +11,7 @@ use lazy_static::lazy_static;
 use prost::Message;
 use protobuf::Message as ProtoMessage;
 use slog::{info, warn};
-use winapi::um::winnt;
+// use winapi::um::winnt;
 // use proto::snappb::Snapshot;
 use proto::snappb::{Snapshot as Snap};
 use raft::eraftpb::Snapshot;
@@ -68,7 +68,7 @@ impl SnapShotter{
         let mut spath =PathBuf::new();
         spath.push(&self.dir);
         spath.push(&fname);
-        let fwrite = write_and_sync_file(&spath, &d, winnt::FILE_GENERIC_WRITE | winnt::FILE_GENERIC_READ);
+        let fwrite = write_and_sync_file(&spath, &d, 0x66);
         match fwrite.await {
             Ok(()) => {
                 println!("write_and_sync_file succeeded");
@@ -149,7 +149,7 @@ impl SnapShotter{
         return Ok(())
     }
     fn load_matching<F> (&self ,mut match_fn: F) ->Result<Snapshot>
-    where F: FnMut(&Snapshot) -> bool,
+        where F: FnMut(&Snapshot) -> bool,
     {
         let names = self.snap_names().unwrap();
         for name in names {
@@ -166,74 +166,74 @@ impl SnapShotter{
     }
 }
 
-    pub fn read(logger: slog::Logger, snap_name: String) -> Result<Snapshot>{
-        let snap = std::fs::read(snap_name.clone())?;
-        if snap.is_empty() {
-            warn!(logger, "failed to read empty snapshot file {}", snap_name);
-            return Err(Error::new(std::io::ErrorKind::Other, "empty snapshot file"));
-        }
-        let mut serializedSnap = Snap::default();
-        serializedSnap = ProtoMessage::parse_from_bytes(&snap).unwrap();
+pub fn read(logger: slog::Logger, snap_name: String) -> Result<Snapshot>{
+    let snap = std::fs::read(snap_name.clone())?;
+    if snap.is_empty() {
+        warn!(logger, "failed to read empty snapshot file {}", snap_name);
+        return Err(Error::new(std::io::ErrorKind::Other, "empty snapshot file"));
+    }
+    let mut serializedSnap = Snap::default();
+    serializedSnap = ProtoMessage::parse_from_bytes(&snap).unwrap();
 
 
-        if serializedSnap.data.len() == 0 || serializedSnap.crc != 0 {
-            warn!(logger, "failed to read empty snapshot data {} or crc!=0 crc=>{}", snap_name, serializedSnap.crc);
-        }
-        digest.update(&serializedSnap.data);
-        let crc = digest.finalize();
-        if crc != serializedSnap.crc {
-            warn!(logger, "crc mismatch, want {}, got {}", serializedSnap.crc, crc);
-            return Err(Error::new(std::io::ErrorKind::Other, "crc mismatch"));
-        }
-
-        let mut snap = Snapshot::default();
-        snap = ProtoMessage::parse_from_bytes(&serializedSnap.data).unwrap();
-        return Ok(snap);
+    if serializedSnap.data.len() == 0 || serializedSnap.crc != 0 {
+        warn!(logger, "failed to read empty snapshot data {} or crc!=0 crc=>{}", snap_name, serializedSnap.crc);
+    }
+    digest.update(&serializedSnap.data);
+    let crc = digest.finalize();
+    if crc != serializedSnap.crc {
+        warn!(logger, "crc mismatch, want {}, got {}", serializedSnap.crc, crc);
+        return Err(Error::new(std::io::ErrorKind::Other, "crc mismatch"));
     }
 
-    fn check_suffix(logger: slog::Logger, names: Vec<String>) -> Result<Vec<String>>{
-        let mut snaps = Vec::new();
-        for name in names {
-            if name.ends_with(snap_suffix){
-                snaps.push(name);
-            }
-            else {
-                if !valid_files.contains_key(&*name) {
-                    warn!(logger,"found unexpected non-snap file; skipping path: {}", name)
-                }
-            }
+    let mut snap = Snapshot::default();
+    snap = ProtoMessage::parse_from_bytes(&serializedSnap.data).unwrap();
+    return Ok(snap);
+}
 
+fn check_suffix(logger: slog::Logger, names: Vec<String>) -> Result<Vec<String>>{
+    let mut snaps = Vec::new();
+    for name in names {
+        if name.ends_with(snap_suffix){
+            snaps.push(name);
         }
-        return Ok(snaps);
-    }
-
-    fn load_snap(dir :String,name: String) -> Result<Snapshot>{
-        // let fpath = join_paths(&[&dir, &name]).unwrap();
-        let mut fpath = PathBuf::new();
-        fpath.push(dir);
-        fpath.push(name);
-        let fpath_str = fpath.to_str().unwrap().to_string();
-        let snap = read(default_logger(), fpath.to_str().unwrap().to_string());
-
-
-        if let Err(ref e) = snap{
-            let mut broken_path = fpath.clone();
-            // let _ = broken_path.join(".broken");
-            broken_path.set_extension("broken");
-            let broken_path_str = broken_path.to_str().unwrap().to_string();
-            warn!(default_logger(),"failed to read a snap file"; "path" => fpath_str.clone(), "err" => ?e);
-            if let Err(e) = std::fs::rename(&fpath, &broken_path){
-                warn!(default_logger(),"failed to rename broken snap file"; "path" => fpath_str, "broken_path" => broken_path_str, "err" => ?e);
-                return Err(e);
-            }
-            else {
-                warn!(default_logger(),"renamed broken snap file"; "path" => fpath_str.clone(), "broken_path" => broken_path_str.clone());
-                return Err(Error::new(ErrorKind::Other, "failed to renamed snap file"));
+        else {
+            if !valid_files.contains_key(&*name) {
+                warn!(logger,"found unexpected non-snap file; skipping path: {}", name)
             }
         }
-        return Ok(snap.unwrap().clone());
 
     }
+    return Ok(snaps);
+}
+
+fn load_snap(dir :String,name: String) -> Result<Snapshot>{
+    // let fpath = join_paths(&[&dir, &name]).unwrap();
+    let mut fpath = PathBuf::new();
+    fpath.push(dir);
+    fpath.push(name);
+    let fpath_str = fpath.to_str().unwrap().to_string();
+    let snap = read(default_logger(), fpath.to_str().unwrap().to_string());
+
+
+    if let Err(ref e) = snap{
+        let mut broken_path = fpath.clone();
+        // let _ = broken_path.join(".broken");
+        broken_path.set_extension("broken");
+        let broken_path_str = broken_path.to_str().unwrap().to_string();
+        warn!(default_logger(),"failed to read a snap file"; "path" => fpath_str.clone(), "err" => ?e);
+        if let Err(e) = std::fs::rename(&fpath, &broken_path){
+            warn!(default_logger(),"failed to rename broken snap file"; "path" => fpath_str, "broken_path" => broken_path_str, "err" => ?e);
+            return Err(e);
+        }
+        else {
+            warn!(default_logger(),"renamed broken snap file"; "path" => fpath_str.clone(), "broken_path" => broken_path_str.clone());
+            return Err(Error::new(ErrorKind::Other, "failed to renamed snap file"));
+        }
+    }
+    return Ok(snap.unwrap().clone());
+
+}
 
 #[cfg(test)]
 mod tests{
@@ -248,7 +248,7 @@ mod tests{
     use std::path::PathBuf;
     use serde::__private::de::IdentifierDeserializer;
     use slog::{info, warn};
-    use winapi::um::winnt;
+    // use winapi::um::winnt;
     use crate::etcdserver::api::rafthttp::snap::default_logger;
     use crate::etcdserver::api::rafthttp::snap::snap_shotter::{digest, read, SnapShotter};
     use crate::etcdserver::api::rafthttp::util::util::write_and_sync_file;
@@ -322,8 +322,9 @@ mod tests{
                 .open(path).unwrap();
         }
         let mut ss = SnapShotter::new(dir.to_str().unwrap().to_string(), default_logger());
-        let names = ss.snap_names().unwrap();
+        let mut names = ss.snap_names().unwrap();
         assert_eq!(names.len(), 5);
+        names.sort();
         let local_names = vec!["1.snap", "2.snap", "3.snap", "4.snap", "5.snap"];
         assert_eq!(names, local_names);
     }
@@ -349,7 +350,7 @@ mod tests{
         fs::create_dir(&dir).unwrap();
         dir.push("1-1.snap");
         let filename = dir.clone();
-        let file = write_and_sync_file(&filename, &[], winnt::FILE_GENERIC_WRITE | winnt::FILE_GENERIC_READ).await;
+        let file = write_and_sync_file(&filename, &[], 0x66).await;
         let read = read(default_logger(), filename.to_str().unwrap().to_string());
         assert_eq!(read.is_err(), true);
     }
@@ -365,7 +366,7 @@ mod tests{
         // dir.push("1.snap");
         let mut filename = dir.clone();
         filename.push("1-1.snap");
-        write_and_sync_file(&filename, &[], winnt::FILE_GENERIC_WRITE | winnt::FILE_GENERIC_READ).await.unwrap();
+        write_and_sync_file(&filename, &[], 0x66).await.unwrap();
         let mut ss = SnapShotter::new(dir.to_str().unwrap().to_string(), default_logger());
         let result = ss.load();
         assert_eq!(result.is_err(), true);
@@ -383,7 +384,7 @@ mod tests{
         for index in snap_indices.iter() {
             let mut filename = dir.clone();
             filename.push(format!("{}.snap.db", index));
-            write_and_sync_file(&filename, &[], winnt::FILE_GENERIC_WRITE | winnt::FILE_GENERIC_READ).await.unwrap();
+            write_and_sync_file(&filename, &[], 0x66).await.unwrap();
         }
 
         let mut sp = Snapshot::default();

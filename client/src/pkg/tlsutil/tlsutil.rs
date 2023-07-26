@@ -3,9 +3,6 @@ use std::io::{BufReader, Cursor};
 use std::path::Path;
 use openssl::error::ErrorStack;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
-use rustls::RootCertStore;
-use rustls_native_certs::Certificate;
-use openssl::x509;
 use openssl::x509::store::X509StoreBuilder;
 use openssl::x509::X509;
 
@@ -90,8 +87,8 @@ mod tests{
         let key_contents = b"test key contents";
         let mut cert_file = NamedTempFile::new().unwrap();
         let mut key_file = NamedTempFile::new().unwrap();
-        let cert_path = PathBuf::from("D:\\桌面\\cert.pem");
-        let key_path = PathBuf::from("D:\\桌面\\key.pem");
+        let cert_path = PathBuf::from("src/pkg/tlsutil/cert.pem");
+        let key_path = PathBuf::from("src/pkg/tlsutil/key.pem");
         cert_file.write_all(cert_contents).unwrap();
         key_file.write_all(key_contents).unwrap();
 

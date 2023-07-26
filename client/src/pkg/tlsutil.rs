@@ -1,6 +1,6 @@
 use slog::o;
 use slog::Drain;
-mod tlsutil;
+pub(crate) mod tlsutil;
 mod cipher_suites;
 
 #[allow(dead_code)]
