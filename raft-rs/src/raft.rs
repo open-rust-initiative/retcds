@@ -26,6 +26,7 @@ use protobuf::Message as _;
 use raft_proto::ConfChangeI;
 use rand::{self, Rng};
 use slog::{self, Logger};
+use serde::{Serialize,Deserialize};
 
 #[cfg(feature = "failpoints")]
 use fail::fail_point;
@@ -53,14 +54,14 @@ pub const CAMPAIGN_PRE_ELECTION: &[u8] = b"CampaignPreElection";
 #[doc(hidden)]
 pub const CAMPAIGN_ELECTION: &[u8] = b"CampaignElection";
 #[doc(hidden)]
-// CAMPAIGN_TRANSFER represents the type of leader transfer.
+// CAMPAIGN_TRANSFER represents the types of leader transfer.
 #[doc(hidden)]
 pub const CAMPAIGN_TRANSFER: &[u8] = b"CampaignTransfer";
 
 pub const NONE: u64 = 0;
 
 /// The role of the node.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy,Serialize,Deserialize)]
 pub enum StateRole {
     /// The node is a follower of the leader.
     Follower,
@@ -83,8 +84,8 @@ pub const INVALID_ID: u64 = 0;
 /// A constant represents invalid index of raft log.
 pub const INVALID_INDEX: u64 = 0;
 
-/// SoftState provides state that is useful for logging and debugging.
-/// The state is volatile and does not need to be persisted to the WAL.
+/// SoftState provides v2state that is useful for logging and debugging.
+/// The v2state is volatile and does not need to be persisted to the WAL.
 #[derive(Default, PartialEq, Eq, Debug,Clone)]
 pub struct SoftState {
     /// The potential leader of the cluster.
@@ -192,7 +193,7 @@ pub struct RaftCore<T: Storage> {
     /// The current role of this node.
     pub state: StateRole,
 
-    /// Indicates whether state machine can be promoted to leader,
+    /// Indicates whether v2state machine can be promoted to leader,
     /// which is true when it's a voter and its own id is in progress list.
     promotable: bool,
 
@@ -247,7 +248,7 @@ pub struct RaftCore<T: Storage> {
 
     // randomized_election_timeout is a random number between
     // [min_election_timeout, max_election_timeout - 1]. It gets reset
-    // when raft changes its state to follower or candidate.
+    // when raft changes its v2state to follower or candidate.
     randomized_election_timeout: usize,
     min_election_timeout: usize,
     max_election_timeout: usize,
@@ -266,7 +267,7 @@ pub struct RaftCore<T: Storage> {
 }
 
 /// A struct that represents the raft consensus itself. Stores details concerning the current
-/// and possible state the system can take.
+/// and possible v2state the system can take.
 pub struct Raft<T: Storage> {
     pub(crate) prs: ProgressTracker,
 
@@ -535,7 +536,7 @@ impl<T: Storage> Raft<T> {
     /// The tuple is (`peer_id`, `group_id`). `group_id` should be larger than 0.
     ///
     /// The group information is only stored in memory. So you need to configure
-    /// it every time a raft state machine is initialized or a snapshot is applied.
+    /// it every time a raft v2state machine is initialized or a snapshot is applied.
     pub fn assign_commit_groups(&mut self, ids: &[(u64, u64)]) {
         let prs = self.mut_prs();
         for (peer_id, group_id) in ids {
@@ -615,7 +616,7 @@ impl<T: Storage> Raft<T> {
 }
 
 impl<T: Storage> RaftCore<T> {
-    // send persists state to stable storage and then sends to its mailbox.
+    // send persists v2state to stable storage and then sends to its mailbox.
     fn send(&mut self, mut m: Message, msgs: &mut Vec<Message>) {
         debug!(
             self.logger,
@@ -961,7 +962,7 @@ impl<T: Storage> Raft<T> {
     ///
     /// # Hooks
     ///
-    /// * Post: Checks to see if it's time to finalize a Joint Consensus state.
+    /// * Post: Checks to see if it's time to finalize a Joint Consensus v2state.
     pub fn commit_apply(&mut self, applied: u64) {
         let old_applied = self.raft_log.applied;
         #[allow(deprecated)]
@@ -1179,7 +1180,7 @@ impl<T: Storage> Raft<T> {
             StateRole::Leader,
             "invalid transition [leader -> pre-candidate]"
         );
-        // Becoming a pre-candidate changes our state.
+        // Becoming a pre-candidate changes our v2state.
         // but doesn't change anything else. In particular it does not increase
         // self.term or change self.vote.
         self.state = StateRole::PreCandidate;
@@ -1221,13 +1222,13 @@ impl<T: Storage> Raft<T> {
         // last index is equal to persisted index when it becomes leader.
         assert_eq!(last_index, self.raft_log.persisted);
 
-        // Update uncommitted state
+        // Update uncommitted v2state
         self.uncommitted_state.uncommitted_size = 0;
         self.uncommitted_state.last_log_tail_index = last_index;
 
         // Followers enter replicate mode when they've been successfully probed
         // (perhaps after having received a snapshot as a result). The leader is
-        // trivially in this state. Note that r.reset() has initialized this
+        // trivially in this v2state. Note that r.reset() has initialized this
         // progress with the last index already.
         let id = self.id;
         self.mut_prs().get_mut(id).unwrap().become_replicate();
@@ -1319,7 +1320,7 @@ impl<T: Storage> Raft<T> {
         info!(
             self.logger,
             "broadcasting vote request";
-            "type" => ?t,
+            "types" => ?t,
             "term" => self.term,
             "log_term" => self.raft_log.last_term(),
             "log_index" => self.raft_log.last_index(),
@@ -1361,7 +1362,7 @@ impl<T: Storage> Raft<T> {
                         msg_index = m.index;
                         "term" => self.term,
                         "remaining ticks" => self.election_timeout - self.election_elapsed,
-                        "msg type" => ?m.get_msg_type(),
+                        "msg types" => ?m.get_msg_type(),
                     );
 
                     return Ok(());
@@ -1387,7 +1388,7 @@ impl<T: Storage> Raft<T> {
                     from = m.from;
                     "term" => self.term,
                     "message_term" => m.term,
-                    "msg type" => ?m.get_msg_type(),
+                    "msg types" => ?m.get_msg_type(),
                 );
                 if m.get_msg_type() == MessageType::MsgAppend
                     || m.get_msg_type() == MessageType::MsgHeartbeat
@@ -1455,7 +1456,7 @@ impl<T: Storage> Raft<T> {
                     "ignored a message with lower term from {from}",
                     from = m.from;
                     "term" => self.term,
-                    "msg type" => ?m.get_msg_type(),
+                    "msg types" => ?m.get_msg_type(),
                     "msg term" => m.term
                 );
             }
@@ -1593,7 +1594,7 @@ impl<T: Storage> Raft<T> {
             msg_term = m.log_term,
             msg_index = m.index,
             term = self.term;
-            "msg type" => ?m.get_msg_type(),
+            "msg types" => ?m.get_msg_type(),
         );
     }
 
@@ -1609,7 +1610,7 @@ impl<T: Storage> Raft<T> {
             msg_term = m.log_term,
             msg_index = m.index,
             term = self.term;
-            "msg type" => ?m.get_msg_type(),
+            "msg types" => ?m.get_msg_type(),
         );
     }
 
@@ -2075,7 +2076,7 @@ impl<T: Storage> Raft<T> {
                         if already_joint && !want_leave {
                             "must transition out of joint config first"
                         } else if !already_joint && want_leave {
-                            "not in joint state; refusing empty conf change"
+                            "not in joint v2state; refusing empty conf change"
                         } else {
                             ""
                         }
@@ -2236,7 +2237,7 @@ impl<T: Storage> Raft<T> {
                 "from" => from,
                 "rejections" => rj,
                 "approvals" => gr,
-                "type" => ?t,
+                "types" => ?t,
                 "term" => self.term,
             );
         }
@@ -2261,7 +2262,7 @@ impl<T: Storage> Raft<T> {
         res
     }
 
-    // step_candidate is shared by state Candidate and PreCandidate; the difference is
+    // step_candidate is shared by v2state Candidate and PreCandidate; the difference is
     // whether they respond to MsgRequestVote or MsgRequestPreVote.
     fn step_candidate(&mut self, m: Message) -> Result<()> {
         match m.get_msg_type() {
@@ -2290,8 +2291,8 @@ impl<T: Storage> Raft<T> {
             }
             MessageType::MsgRequestPreVoteResponse | MessageType::MsgRequestVoteResponse => {
                 // Only handle vote responses corresponding to our candidacy (while in
-                // state Candidate, we may get stale MsgPreVoteResp messages in this term from
-                // our pre-candidate state).
+                // v2state Candidate, we may get stale MsgPreVoteResp messages in this term from
+                // our pre-candidate v2state).
                 if (self.state == StateRole::PreCandidate
                     && m.get_msg_type() != MessageType::MsgRequestPreVoteResponse)
                     || (self.state == StateRole::Candidate
@@ -2308,7 +2309,7 @@ impl<T: Storage> Raft<T> {
                 "{term} ignored MsgTimeoutNow from {from}",
                 term = self.term,
                 from = m.from;
-                "state" => ?self.state,
+                "v2state" => ?self.state,
             ),
             _ => {}
         }
@@ -2567,8 +2568,8 @@ impl<T: Storage> Raft<T> {
         }
     }
 
-    /// Recovers the state machine from a snapshot. It restores the log and the
-    /// configuration of state machine.
+    /// Recovers the v2state machine from a snapshot. It restores the log and the
+    /// configuration of v2state machine.
     pub fn restore(&mut self, snap: Snapshot) -> bool {
         if snap.get_metadata().index < self.raft_log.committed {
             return false;
@@ -2576,12 +2577,12 @@ impl<T: Storage> Raft<T> {
         if self.state != StateRole::Follower {
             // This is defense-in-depth: if the leader somehow ended up applying a
             // snapshot, it could move into a new term without moving into a
-            // follower state. This should never fire, but if it did, we'd have
+            // follower v2state. This should never fire, but if it did, we'd have
             // prevented damage by returning early, so log only a loud warning.
             //
             // At the time of writing, the instance is guaranteed to be in follower
-            // state when this method is called.
-            warn!(self.logger, "non-follower attempted to restore snapshot"; "state" => ?self.state);
+            // v2state when this method is called.
+            warn!(self.logger, "non-follower attempted to restore snapshot"; "v2state" => ?self.state);
             self.become_follower(self.term + 1, INVALID_INDEX);
             return false;
         }
@@ -2670,11 +2671,11 @@ impl<T: Storage> Raft<T> {
         true
     }
 
-    /// Updates the in-memory state and, when necessary, carries out additional actions
+    /// Updates the in-memory v2state and, when necessary, carries out additional actions
     /// such as reacting to the removal of nodes or changed quorum requirements.
     pub fn post_conf_change(&mut self) -> ConfState {
         info!(self.logger, "switched to configuration"; "config" => ?self.prs.conf());
-        // TODO: instead of creating a conf state, validating conf state inside
+        // TODO: instead of creating a conf v2state, validating conf v2state inside
         // progress tracker is better.
         let cs = self.prs.conf().to_conf_state();
         let is_voter = self.prs.conf().voters.contains(self.id);
@@ -2756,7 +2757,7 @@ impl<T: Storage> Raft<T> {
         !self.skip_bcast_commit || self.has_pending_conf()
     }
 
-    /// Indicates whether state machine can be promoted to leader,
+    /// Indicates whether v2state machine can be promoted to leader,
     /// which is true when it's a voter and its own id is in progress list.
     pub fn promotable(&self) -> bool {
         self.promotable
@@ -2788,7 +2789,7 @@ impl<T: Storage> Raft<T> {
     }
 
     // TODO: revoke pub when there is a better way to test.
-    /// For a given hardstate, load the state into self.
+    /// For a given hardstate, load the v2state into self.
     pub fn load_state(&mut self, hs: &HardState) {
         if hs.commit < self.raft_log.committed || hs.commit > self.raft_log.last_index() {
             fatal!(
@@ -2827,7 +2828,7 @@ impl<T: Storage> Raft<T> {
     }
 
     // check_quorum_active returns true if the quorum is active from
-    // the view of the local raft state machine. Otherwise, it returns
+    // the view of the local raft v2state machine. Otherwise, it returns
     // false.
     // check_quorum_active also resets all recent_active to false.
     // check_quorum_active can only called by leader.

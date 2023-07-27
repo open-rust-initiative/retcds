@@ -6,7 +6,7 @@ use std::cmp;
 /// The progress of catching up from a restart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Progress {
-    /// How much state is matched.
+    /// How much v2state is matched.
     pub matched: u64,
     /// The next index to apply
     pub next_idx: u64,
@@ -15,7 +15,7 @@ pub struct Progress {
     ///
     /// When in ProgressStateReplicate, leader optimistically increases next
     /// to the latest entry sent after sending replication message. This is
-    /// an optimized state for fast replicating log entries to the follower.
+    /// an optimized v2state for fast replicating log entries to the follower.
     ///
     /// When in ProgressStateSnapshot, leader should have sent out snapshot
     /// before and stop sending any replication message.
@@ -92,7 +92,7 @@ impl Progress {
 
     /// Changes the progress to a probe.
     pub fn become_probe(&mut self) {
-        // If the original state is ProgressStateSnapshot, progress knows that
+        // If the original v2state is ProgressStateSnapshot, progress knows that
         // the pending snapshot has been sent to this peer successfully, then
         // probes from pendingSnapshot + 1.
         if self.state == ProgressState::Snapshot {
@@ -234,7 +234,7 @@ impl Progress {
             }
             ProgressState::Probe => self.pause(),
             ProgressState::Snapshot => panic!(
-                "updating progress state in unhandled state {:?}",
+                "updating progress v2state in unhandled v2state {:?}",
                 self.state
             ),
         }
@@ -311,7 +311,7 @@ mod tests {
             p.become_probe();
             if p.state != ProgressState::Probe {
                 panic!(
-                    "#{}: state = {:?}, want {:?}",
+                    "#{}: v2state = {:?}, want {:?}",
                     i,
                     p.state,
                     ProgressState::Probe
@@ -373,11 +373,11 @@ mod tests {
     #[test]
     fn test_progress_maybe_decr() {
         let tests = vec![
-            // state replicate and rejected is not greater than match
+            // v2state replicate and rejected is not greater than match
             (ProgressState::Replicate, 5, 10, 5, 5, false, 10),
-            // state replicate and rejected is not greater than match
+            // v2state replicate and rejected is not greater than match
             (ProgressState::Replicate, 5, 10, 4, 4, false, 10),
-            // state replicate and rejected is greater than match
+            // v2state replicate and rejected is greater than match
             // directly decrease to match+1
             (ProgressState::Replicate, 5, 10, 9, 9, true, 6),
             // next-1 != rejected is always false

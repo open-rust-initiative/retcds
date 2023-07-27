@@ -27,7 +27,7 @@ fn test_msg_app_flow_control_full() {
     r.become_candidate();
     r.become_leader();
 
-    // force the progress to be in replicate state
+    // force the progress to be in replicate v2state
     r.mut_prs().get_mut(2).unwrap().become_replicate();
     // fill in the inflights window
     for i in 0..r.max_inflight {
@@ -64,7 +64,7 @@ fn test_msg_app_flow_control_move_forward() {
     r.become_candidate();
     r.become_leader();
 
-    // force the progress to be in replicate state
+    // force the progress to be in replicate v2state
     r.mut_prs().get_mut(2).unwrap().become_replicate();
     // fill in the inflights window
     for _ in 0..r.max_inflight {
@@ -118,7 +118,7 @@ fn test_msg_app_flow_control_recv_heartbeat() {
     r.become_candidate();
     r.become_leader();
 
-    // force the progress to be in replicate state
+    // force the progress to be in replicate v2state
     r.mut_prs().get_mut(2).unwrap().become_replicate();
     // fill in the inflights window
     for _ in 0..r.max_inflight {
@@ -189,7 +189,7 @@ fn test_msg_app_flow_control_with_freeing_resources() {
     }
 
     for i in 1..=3 {
-        // Force the progress to be in replicate state.
+        // Force the progress to be in replicate v2state.
         r.mut_prs().get_mut(i).unwrap().become_replicate();
     }
 

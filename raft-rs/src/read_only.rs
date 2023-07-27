@@ -41,14 +41,14 @@ impl Default for ReadOnlyOption {
     }
 }
 
-/// ReadState provides state for read only query.
+/// ReadState provides v2state for read only query.
 /// It's caller's responsibility to send MsgReadIndex first before getting
-/// this state from ready. It's also caller's duty to differentiate if this
-/// state is what it requests through request_ctx, e.g. given a unique id as
+/// this v2state from ready. It's also caller's duty to differentiate if this
+/// v2state is what it requests through request_ctx, e.g. given a unique id as
 /// request_ctx.
 #[derive(Default, Debug, PartialEq, Eq, Clone)]
 pub struct ReadState {
-    /// The index of the read state.
+    /// The index of the read v2state.
     pub index: u64,
     /// A datagram consisting of context about the request.
     pub request_ctx: Vec<u8>,
@@ -79,7 +79,7 @@ impl ReadOnly {
 
     /// Adds a read only request into readonly struct.
     ///
-    /// `index` is the commit index of the raft state machine when it received
+    /// `index` is the commit index of the raft v2state machine when it received
     /// the read only request.
     ///
     /// `m` is the original read only request message from the local or remote node.
@@ -98,7 +98,7 @@ impl ReadOnly {
         self.read_index_queue.push_back(ctx);
     }
 
-    /// Notifies the ReadOnly struct that the raft state machine received
+    /// Notifies the ReadOnly struct that the raft v2state machine received
     /// an acknowledgment of the heartbeat that attached with the read only request
     /// context.
     pub fn recv_ack(&mut self, id: u64, ctx: &[u8]) -> Option<&HashSet<u64>> {
@@ -115,7 +115,7 @@ impl ReadOnly {
         let mut rss = vec![];
         if let Some(i) = self.read_index_queue.iter().position(|x| {
             if !self.pending_read_index.contains_key(x) {
-                fatal!(logger, "cannot find correspond read state from pending map");
+                fatal!(logger, "cannot find correspond read v2state from pending map");
             }
             *x == ctx
         }) {

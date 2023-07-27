@@ -1,0 +1,22 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+pem = "2"
+rustls-native-certs = "0.6"
+rustls = "0.21"
+openssl-sys = "0.9"
+openssl = "0.10"
+slog = "2.2"
+slog-envlogger = "2.1.0"
+slog-stdlog = "4"
+slog-term = "2.4.0"
+slog-async = "2.3.0"
+tempfile = "3.2.0"
+nix = "0.26"
+rand = "0.8"
+num-bigint = "0.4"

@@ -51,7 +51,7 @@ pub struct RaftLog<T: Storage> {
     pub persisted: u64,
 
     /// The highest log position that the application has been instructed
-    /// to apply to its state machine.
+    /// to apply to its v2state machine.
     ///
     /// Invariant: applied <= min(committed, persisted)
     pub applied: u64,

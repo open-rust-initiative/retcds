@@ -74,7 +74,7 @@ fn test_leader_update_term_from_message() {
 // test_update_term_from_message tests that if one server’s current term is
 // smaller than the other’s, then it updates its current term to the larger
 // value. If a candidate or leader discovers that its term is out of date,
-// it immediately reverts to follower state.
+// it immediately reverts to follower v2state.
 // Reference: section 5.1
 fn test_update_term_from_message(state: StateRole, l: &Logger) {
     let mut r = new_test_raft(1, vec![1, 2, 3], 10, 1, new_storage(), l);
@@ -153,7 +153,7 @@ fn test_candidate_start_new_election() {
 
 // test_nonleader_start_election tests that if a follower receives no communication
 // over election timeout, it begins an election to choose a new leader. It
-// increments its current term and transitions to candidate state. It then
+// increments its current term and transitions to candidate v2state. It then
 // votes for itself and issues RequestVote RPCs in parallel to each of the
 // other servers in the cluster.
 // Reference: section 5.2
@@ -210,7 +210,7 @@ fn test_leader_election_in_one_round_rpc() {
         ),
         (5, map!(2 => true, 3 => true, 4 => true), StateRole::Leader),
         (5, map!(2 => true, 3 => true), StateRole::Leader),
-        // return to follower state if it receives vote denial from a majority
+        // return to follower v2state if it receives vote denial from a majority
         (3, map!(2 => false, 3 => false), StateRole::Follower),
         (
             5,
@@ -241,7 +241,7 @@ fn test_leader_election_in_one_round_rpc() {
         }
 
         if r.state != state {
-            panic!("#{}: state = {:?}, want {:?}", i, r.state, state);
+            panic!("#{}: v2state = {:?}, want {:?}", i, r.state, state);
         }
         if r.term != 1 {
             panic!("#{}: term = {}, want {}", i, r.term, 1);
@@ -286,7 +286,7 @@ fn test_follower_vote() {
 // test_candidate_fallback tests that while waiting for votes,
 // if a candidate receives an AppendEntries RPC from another server claiming
 // to be leader whose term is at least as large as the candidate's current term,
-// it recognizes the leader as legitimate and returns to follower state.
+// it recognizes the leader as legitimate and returns to follower v2state.
 // Reference: section 5.2
 #[test]
 fn test_candidate_fallback() {
@@ -307,7 +307,7 @@ fn test_candidate_fallback() {
 
         if r.state != StateRole::Follower {
             panic!(
-                "#{}: state = {:?}, want {:?}",
+                "#{}: v2state = {:?}, want {:?}",
                 i,
                 r.state,
                 StateRole::Follower
@@ -343,7 +343,7 @@ fn test_non_leader_election_timeout_randomized(state: StateRole, l: &Logger) {
         match state {
             StateRole::Follower => r.become_follower(term + 1, 2),
             StateRole::Candidate => r.become_candidate(),
-            _ => panic!("only non leader state is accepted!"),
+            _ => panic!("only non leader v2state is accepted!"),
         }
 
         let mut time = 0;
@@ -391,7 +391,7 @@ fn test_nonleaders_election_timeout_nonconfict(state: StateRole, l: &Logger) {
             match state {
                 StateRole::Follower => r.become_follower(term + 1, INVALID_ID),
                 StateRole::Candidate => r.become_candidate(),
-                _ => panic!("non leader state is expect!"),
+                _ => panic!("non leader v2state is expect!"),
             }
         }
 
@@ -457,7 +457,7 @@ fn test_leader_start_replication() {
 }
 
 // test_leader_commit_entry tests that when the entry has been safely replicated,
-// the leader gives out the applied entries, which can be applied to its state
+// the leader gives out the applied entries, which can be applied to its v2state
 // machine.
 // Also, the leader keeps track of the highest index it knows to be committed,
 // and it includes that index in future AppendEntries RPCs so that the other
@@ -536,7 +536,7 @@ fn test_leader_acknowledge_commit() {
 // test_leader_commit_preceding_entries tests that when leader commits a log entry,
 // it also commits all preceding entries in the leader’s log, including
 // entries created by previous leaders.
-// Also, it applies the entry to its local state machine (in log order).
+// Also, it applies the entry to its local v2state machine (in log order).
 // Reference: section 5.3
 #[test]
 fn test_leader_commit_preceding_entries() {
@@ -581,7 +581,7 @@ fn test_leader_commit_preceding_entries() {
 }
 
 // test_follower_commit_entry tests that once a follower learns that a log entry
-// is committed, it applies the entry to its local state machine (in log order).
+// is committed, it applies the entry to its local v2state machine (in log order).
 // Reference: section 5.3
 #[test]
 fn test_follower_commit_entry() {

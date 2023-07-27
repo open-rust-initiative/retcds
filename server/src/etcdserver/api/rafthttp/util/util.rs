@@ -2,10 +2,11 @@ use std::ffi::OsString;
 use std::io::Error;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 // 导入了windows的文件系统模块，不适用其他系统
-use std::os::windows::fs::OpenOptionsExt;
+// use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use winapi::um::winnt;
+// use winapi::um::winnt;
 pub type Result<T> = std::result::Result<T, Error>;
 
 
@@ -14,7 +15,7 @@ pub async fn write_and_sync_file(filename: &PathBuf, content: &[u8], perm :u32) 
         .write(true)
         .create(true)
         .truncate(true)
-        .access_mode(perm)
+        .mode(perm)
         .open(filename)?;
 
 

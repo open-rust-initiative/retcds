@@ -1,6 +1,6 @@
 //! Represents the storage trait and example implementation.
 //!
-//! The storage trait is used to house and eventually serialize the state of the system.
+//! The storage trait is used to house and eventually serialize the v2state of the system.
 //! Custom implementations of this are normal and this is likely to be a key integration
 //! point for your distributed storage.
 
@@ -30,7 +30,7 @@ use crate::util::limit_size;
 
 use getset::{Getters, Setters};
 
-/// Holds both the hard state (commit index, vote leader, term) and the configuration state
+/// Holds both the hard v2state (commit index, vote leader, term) and the configuration v2state
 /// (Current node IDs)
 #[derive(Debug, Clone, Default, Getters, Setters)]
 pub struct RaftState {
@@ -152,14 +152,14 @@ pub trait Storage {
     /// Returns the most recent snapshot.
     ///
     /// If snapshot is temporarily unavailable, it should return SnapshotTemporarilyUnavailable,
-    /// so raft state machine could know that Storage needs some time to prepare
+    /// so raft v2state machine could know that Storage needs some time to prepare
     /// snapshot and call snapshot later.
     /// A snapshot's index must not less than the `request_index`.
     /// `to` indicates which peer is requesting the snapshot.
     fn snapshot(&self, request_index: u64, to: u64) -> Result<Snapshot>;
 }
 
-/// The Memory Storage Core instance holds the actual state of the storage struct. To access this
+/// The Memory Storage Core instance holds the actual v2state of the storage struct. To access this
 /// value, use the `rl` and `wl` functions on the main MemStorage implementation.
 #[derive(Default)]
 pub struct MemStorageCore {
@@ -183,12 +183,12 @@ impl MemStorageCore {
         self.raft_state.hard_state = hs;
     }
 
-    /// Get the hard state.
+    /// Get the hard v2state.
     pub fn hard_state(&self) -> &HardState {
         &self.raft_state.hard_state
     }
 
-    /// Get the mut hard state.
+    /// Get the mut hard v2state.
     pub fn mut_hard_state(&mut self) -> &mut HardState {
         &mut self.raft_state.hard_state
     }
@@ -211,7 +211,7 @@ impl MemStorageCore {
         Ok(())
     }
 
-    /// Saves the current conf state.
+    /// Saves the current conf v2state.
     pub fn set_conf_state(&mut self, cs: ConfState) {
         self.raft_state.conf_state = cs;
     }
@@ -412,7 +412,7 @@ impl MemStorage {
     {
         assert!(!self.initial_state().unwrap().initialized());
         let mut core = self.wl();
-        // Setting initial state is very important to build a correct raft, as raft algorithm
+        // Setting initial v2state is very important to build a correct raft, as raft algorithm
         // itself only guarantees logs consistency. Typically, you need to ensure either all start
         // states are the same on all nodes, or new nodes always catch up logs by snapshot first.
         //

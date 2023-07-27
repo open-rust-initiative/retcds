@@ -8,7 +8,7 @@ use crate::eraftpb::{ConfChangeSingle, ConfChangeType, ConfState};
 use crate::tracker::ProgressTracker;
 use crate::Result;
 
-/// Translates a conf state into 1) a slice of operations creating first the config that
+/// Translates a conf v2state into 1) a slice of operations creating first the config that
 /// will become the outgoing one, and then the incoming one, and b) another slice that,
 /// when applied to the config resulted from 1), represents the ConfState.
 fn to_conf_change_single(cs: &ConfState) -> (Vec<ConfChangeSingle>, Vec<ConfChangeSingle>) {
@@ -19,7 +19,7 @@ fn to_conf_change_single(cs: &ConfState) -> (Vec<ConfChangeSingle>, Vec<ConfChan
     // had voters (1 2 4 6) and perhaps some learners that are already gone.
     // The new set of voters is (1 2 3), i.e. (1 2) were kept around, and (4 6)
     // are no longer voters; however 4 is poised to become a learner upon leaving
-    // the joint state.
+    // the joint v2state.
     // We can't tell whether 5 was a learner before entering the joint config,
     // but it doesn't matter (we'll pretend that it wasn't).
     //
@@ -34,7 +34,7 @@ fn to_conf_change_single(cs: &ConfState) -> (Vec<ConfChangeSingle>, Vec<ConfChan
     //
     //   quorum=(1 2 4 6)
     //
-    // From which we enter a joint state via 'incoming'
+    // From which we enter a joint v2state via 'incoming'
     //
     //   quorum=(1 2 3)&&(1 2 4 6) learners=(5) learners_next=(4)
     //

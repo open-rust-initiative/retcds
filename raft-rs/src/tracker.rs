@@ -45,7 +45,7 @@ pub struct Configuration {
     #[get = "pub"]
     pub(crate) learners: HashSet<u64>,
     /// When we turn a voter into a learner during a joint consensus transition,
-    /// we cannot add the learner directly when entering the joint state. This is
+    /// we cannot add the learner directly when entering the joint v2state. This is
     /// because this would violate the invariant that the intersection of
     /// voters and learners is empty. For example, assume a Voter is removed and
     /// immediately re-added as a learner (or in other words, it is demoted):
@@ -193,7 +193,7 @@ pub struct ProgressTracker {
     // #[get = "pub(crate)"]
     pub(crate) progress: ProgressMap,
 
-    /// The current configuration state of the cluster.
+    /// The current configuration v2state of the cluster.
     #[get = "pub"]
     pub(crate) conf: Configuration,
     #[doc(hidden)]

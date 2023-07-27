@@ -47,7 +47,7 @@ pub struct Network {
     pub storage: HashMap<u64, MemStorage>,
     /// Drop messages from `from` to `to` at a rate of `f64`.
     dropm: HashMap<Connection, f64>,
-    /// Drop messages of type `MessageType`.
+    /// Drop messages of types `MessageType`.
     ignorem: HashMap<MessageType, bool>,
 }
 

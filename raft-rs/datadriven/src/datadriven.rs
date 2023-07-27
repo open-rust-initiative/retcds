@@ -63,7 +63,7 @@ use slog::debug;
 ///
 /// `F` is customize function: `FnOnce(&TestData) -> String`
 ///
-/// you will get input as type `TestData` and your expected output as type `String`
+/// you will get input as types `TestData` and your expected output as types `String`
 ///
 /// Note: you need `end line` after each line if you have multiple lines.
 /// This is used to separate them, instead of mixing the characters altogether.

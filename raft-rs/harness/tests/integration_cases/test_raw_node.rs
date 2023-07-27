@@ -336,7 +336,7 @@ fn test_raw_node_propose_and_conf_change() {
         assert_eq!(conf_index, raw_node.raft.pending_conf_index);
 
         // Move the RawNode along. If the ConfChange was simple, nothing else
-        // should happen. Otherwise, we're in a joint state, which is either
+        // should happen. Otherwise, we're in a joint v2state, which is either
         // left automatically or not. If not, we add the proposal that leaves
         // it manually.
         let mut rd = raw_node.ready();
@@ -562,7 +562,7 @@ fn test_raw_node_propose_add_learner_node() -> Result<()> {
         let _ = raw_node.advance(rd);
     }
 
-    // propose add learner node and check apply state
+    // propose add learner node and check apply v2state
     let cc = conf_change(ConfChangeType::AddLearnerNode, 2);
     raw_node.propose_conf_change(vec![], cc).expect("");
 
@@ -629,7 +629,7 @@ fn test_raw_node_read_index() {
 }
 
 /// Ensures that a node can be started correctly. Note that RawNode requires the
-/// application to bootstrap the state, i.e. it does not accept peers and will not
+/// application to bootstrap the v2state, i.e. it does not accept peers and will not
 /// create faux configuration change entries.
 #[test]
 fn test_raw_node_start() {
@@ -885,7 +885,7 @@ fn prepare_async_entries(raw_node: &mut RawNode<MemStorage>, s: &MemStorage) {
     let msgs = rd.messages();
     // First append has two entries: the empty entry to confirm the
     // election, and the first proposal (only one proposal gets sent
-    // because we're in probe state).
+    // because we're in probe v2state).
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0].msg_type, MessageType::MsgAppend);
     assert_eq!(msgs[0].entries.len(), 2);
@@ -893,7 +893,7 @@ fn prepare_async_entries(raw_node: &mut RawNode<MemStorage>, s: &MemStorage) {
 
     s.wl().trigger_log_unavailable(true);
 
-    // Become replicate state
+    // Become replicate v2state
     let mut append_response = new_message(2, 1, MessageType::MsgAppendResponse, 0);
     append_response.set_term(2);
     append_response.set_index(2);
@@ -1012,7 +1012,7 @@ fn test_raw_node_async_entries_with_leader_change() {
     let msgs = rd.messages();
     // First append has two entries: the empty entry to confirm the
     // election, and the first proposal (only one proposal gets sent
-    // because we're in probe state).
+    // because we're in probe v2state).
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0].msg_type, MessageType::MsgAppend);
     assert_eq!(msgs[0].entries.len(), 2);
@@ -1020,7 +1020,7 @@ fn test_raw_node_async_entries_with_leader_change() {
 
     s.wl().trigger_log_unavailable(true);
 
-    // Become replicate state
+    // Become replicate v2state
     let mut append_response = new_message(2, 1, MessageType::MsgAppendResponse, 0);
     append_response.set_term(2);
     append_response.set_index(2);

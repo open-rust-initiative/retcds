@@ -28,7 +28,7 @@ fn test_conf_change_data_driven() -> anyhow::Result<()> {
                                     for val in &arg.vals {
                                         auto_leave = val
                                             .parse()
-                                            .expect("type of autoleave should be boolean")
+                                            .expect("types of autoleave should be boolean")
                                     }
                                 }
                                 _ => {

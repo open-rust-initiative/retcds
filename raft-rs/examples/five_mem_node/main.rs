@@ -181,7 +181,7 @@ impl Node {
         let mut s = Snapshot::default();
         // Because we don't use the same configuration to initialize every node, so we use
         // a non-zero index to force new followers catch up logs by snapshot first, which will
-        // bring all nodes to the same initial state.
+        // bring all nodes to the same initial v2state.
         s.mut_metadata().index = 1;
         s.mut_metadata().term = 1;
         s.mut_metadata().mut_conf_state().voters = vec![1];

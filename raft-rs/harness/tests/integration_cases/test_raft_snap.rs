@@ -215,7 +215,7 @@ fn test_request_snapshot() {
         snap
     );
 
-    // Append/heartbeats does not set the state from snapshot to probe.
+    // Append/heartbeats does not set the v2state from snapshot to probe.
     let mut m = new_message(2, 1, MessageType::MsgAppendResponse, 0);
     m.index = 11;
     sm.step(m).unwrap();

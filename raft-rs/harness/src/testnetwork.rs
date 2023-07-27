@@ -56,7 +56,7 @@ fn test_network() {
     assert_eq!(network.peers.get(&1).unwrap().raft_log.last_index(), 2);
     assert_eq!(network.peers.get(&2).unwrap().raft_log.last_index(), 2);
 
-    // Ignore all messages of type `MsgAppend`.
+    // Ignore all messages of types `MsgAppend`.
     network.ignore(MessageType::MsgAppend);
 
     // Send another message from node 1 to node 2.

@@ -101,7 +101,7 @@ Raft server. You can call `propose` to add the request to the Raft log explicitl
 In most cases, the client needs to wait for a response for the request. For example, if the
 client writes a value to a key and wants to know whether the write succeeds or not, but the
 write flow is asynchronous in Raft, so the write log entry must be replicated to other followers,
-then committed and at last applied to the state machine, so here we need a way to notify the client
+then committed and at last applied to the v2state machine, so here we need a way to notify the client
 after the write is finished.
 
 One simple way is to use a unique ID for the client request, and save the associated callback
@@ -175,9 +175,9 @@ and propose the encoded binary request data.
 
 ## Processing the `Ready` State
 
-When your Raft node is ticked and running, Raft should enter a `Ready` state. You need to first use
+When your Raft node is ticked and running, Raft should enter a `Ready` v2state. You need to first use
 `has_ready` to check whether Raft is ready. If yes, use the `ready` function to get a `Ready`
-state:
+v2state:
 
 ```rust
 # use slog::{Drain, o};
@@ -197,7 +197,7 @@ if !node.has_ready() {
 let mut ready = node.ready();
 ```
 
-The `Ready` state contains quite a bit of information, and you need to check and process them one
+The `Ready` v2state contains quite a bit of information, and you need to check and process them one
 by one:
 
 1. Check whether `messages` is empty or not. If not, it means that the node will send messages to
@@ -254,7 +254,7 @@ a Raft snapshot from the leader and we must apply the snapshot:
     ```
 
 3. Check whether `committed_entries` is empty or not. If not, it means that there are some newly
-committed log entries which you must apply to the state machine. Of course, after applying, you
+committed log entries which you must apply to the v2state machine. Of course, after applying, you
 need to update the applied index and resume `apply` later:
 
     ```rust

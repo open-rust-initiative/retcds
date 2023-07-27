@@ -1,7 +1,7 @@
 // Copyright 2019 TiKV Project Authors. Licensed under Apache-2.0.
 use thiserror::Error;
 
-/// The base error type for raft
+/// The base error types for raft
 #[derive(Debug, Error)]
 pub enum Error {
     /// An IO error occurred
@@ -124,7 +124,7 @@ impl PartialEq for StorageError {
     }
 }
 
-/// A result type that wraps up the raft errors.
+/// A result types that wraps up the raft errors.
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[allow(clippy::eq_op)]

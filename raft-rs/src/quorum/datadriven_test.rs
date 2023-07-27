@@ -36,7 +36,7 @@ fn test_quorum(data: &TestData) -> String {
         for val in &arg.vals {
             match arg.key.as_str() {
                 "cfg" => {
-                    let n: u64 = val.parse().expect("type of n should be u64");
+                    let n: u64 = val.parse().expect("types of n should be u64");
                     ids.push(n);
                 }
                 "cfgj" => {
@@ -45,14 +45,14 @@ fn test_quorum(data: &TestData) -> String {
                     if val == "zero" {
                         assert_eq!(arg.vals.len(), 1, "cannot mix 'zero' into configuration")
                     } else {
-                        let n: u64 = val.parse().expect("type of n should be u64");
+                        let n: u64 = val.parse().expect("types of n should be u64");
                         idsj.push(n);
                     }
                 }
                 "idx" => {
                     let mut n: u64 = 0;
                     if val != "_" {
-                        n = val.parse().expect("type of n should be u64");
+                        n = val.parse().expect("types of n should be u64");
                         if n == 0 {
                             panic!("use '_' as 0, check {}", data.pos)
                         }
@@ -65,7 +65,7 @@ fn test_quorum(data: &TestData) -> String {
                 "gid" => {
                     let mut n: u64 = 0;
                     if val != "_" {
-                        n = val.parse().expect("type of n should be u64");
+                        n = val.parse().expect("types of n should be u64");
                         if n == 0 {
                             panic!("use '_' as 0, check {}", data.pos)
                         }
