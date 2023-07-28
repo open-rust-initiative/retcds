@@ -4,6 +4,7 @@ use std::io::{Error, ErrorKind, Write};
 use std::ops::Shl;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::sync::Arc;
 use num_bigint::{BigUint, ToBigUint};
 use openssl::asn1::{Asn1Integer, Asn1IntegerRef, Asn1Time};
 use openssl::bn::BigNum;
@@ -224,15 +225,16 @@ impl TLSInfo{
         }
         let mut tls_build = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
         // tls_build.set_servername_callback(self.server_name.clone());
+        let server_name = std::mem::replace(&mut self.server_name.clone(), String::new()).as_str();
         tls_build.set_servername_callback(move |ssl, _| {
-            if let Err(e) = ssl.set_hostname(self.server_name.clone().as_str()) {
-                error!(self.logger,"Error setting servername: {}", e);
+            if let Err(e) = ssl.set_hostname(server_name) {
+                error!(default_logger(),"Error setting servername: {}", e);
             }
             Ok(())
         });
         tls_build.set_min_proto_version(Option::from(SslVersion::TLS1_2)).unwrap();
         // let verify_certificate: fn(cert:&X509) -> bool;
-        type VerifyCertificateFn = dyn Fn(&X509) -> bool;
+        type VerifyCertificateFn = Arc<dyn Fn(&X509) -> bool + Send + Sync>;
         if self.cipher_suites.len() >0 {
             tls_build.set_ciphersuites(self.cipher_suites.as_str()).unwrap();
         }
@@ -240,7 +242,7 @@ impl TLSInfo{
             if self.allowed_hostname !=""{
                 return Err(Error::new(ErrorKind::Other, format!("AllowedCN and AllowedHostname are mutually exclusive (cn={}, hostname={}",self.allowed_cn, self.allowed_hostname)));
             }
-            let verify_certificate: VerifyCertificateFn = |cert: &X509| -> bool {
+            let verify_certificate: VerifyCertificateFn = Arc::new(|cert: &X509| -> bool {
                return  self.allowed_cn == cert.subject_name()
                     .entries_by_nid(Nid::COMMONNAME)
                     .next()
@@ -249,7 +251,7 @@ impl TLSInfo{
                     .as_utf8()
                     .unwrap()
                     .to_string()
-            };
+            });
         }
         return  Ok((TLSInfo::new()))
 
