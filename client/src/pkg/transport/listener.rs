@@ -1,25 +1,25 @@
-use std::ffi;
+use std::fmt::Pointer;
 use std::fs::{canonicalize, File, Permissions, set_permissions};
 use std::io::{Error, ErrorKind, Write};
 use std::ops::Shl;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use nix::libc::option;
 use num_bigint::{BigUint, ToBigUint};
 use openssl::asn1::{Asn1Integer, Asn1IntegerRef, Asn1Time};
 use openssl::bn::BigNum;
 use openssl::ec::{EcGroup, EcKey};
+use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
-use openssl::x509::{X509Builder, X509Extension, X509NameBuilder};
+use openssl::ssl::{SslAcceptor, SslContextBuilder, SslMethod, SslVersion};
+use openssl::x509::{X509, X509Builder, X509Extension, X509NameBuilder, X509StoreContext};
 use openssl::x509::extension::{ExtendedKeyUsage, KeyUsage, SubjectAlternativeName};
-use openssl_sys::{BIGNUM, BIO, PEM_write_bio_X509, X509};
 use rand::{Rng, thread_rng};
-use rustls::{Certificate, Connection};
-use slog::{info, Logger, warn};
+use slog::{error, info, Logger, warn};
 use crate::pkg::fileutil::fileutil::torch_dir_all;
 use crate::pkg::tlsutil::default_logger;
+use crate::pkg::tlsutil::tlsutil::new_cert;
 
 #[derive(Clone)]
 struct TLSInfo {
@@ -44,18 +44,19 @@ struct TLSInfo {
 
     // HandshakeFailure is optionally called when a connection fails to handshake. The
     // connection will be closed immediately afterwards.
-    handshake_failure: Option<fn(&Connection, Error)>,
+    handshake_failure: Option<fn(&[u8], &[u8]) -> Result<SslAcceptor, ErrorStack>>,
 
     // CipherSuites is a list of supported cipher suites.
     // If empty, Go auto-populates it by default.
     // Note that cipher suites are prioritized in the given order.
-    cipher_suites: Vec<u16>,
+    // cipher_suites: Vec<u16>,
+    cipher_suites: String,
 
     self_cert: bool,
 
     // parseFunc exists to simplify testing. Typically, parseFunc
     // should be left nil. In that case, tls.X509KeyPair will be used.
-    parse_func: Option<fn(Vec<u8>, Vec<u8>) -> Result<Certificate, Error>>,
+    parse_func: Option<fn(&[u8], &[u8]) -> Result<SslAcceptor, ErrorStack>>,
 
     // AllowedCN is a CN which must be provided by a client.
     allowed_cn: String,
@@ -87,7 +88,7 @@ impl TLSInfo{
             skip_clientSAN_verify: false,
             server_name: String::from(""),
             handshake_failure: None,
-            cipher_suites: Vec::with_capacity(0),
+            cipher_suites: String::from(""),
             self_cert: false,
             parse_func: None,
             allowed_cn: String::from(""),
@@ -197,8 +198,60 @@ impl TLSInfo{
             return Err(Error::new(ErrorKind::Other, "cannot write key file"));
         }
         set_permissions(key_file.clone(),Permissions::from_mode(0o600)).unwrap();
-
         return self.self_cert(dirpath.clone(), hosts.clone(), self_signed_cert_validity.clone(), None);
+    }
+
+    // baseConfig is called on initial TLS handshake start.
+    pub fn base_config(&mut self) ->Result<TLSInfo,Error>{
+        if self.key_file == "" || self.cert_file == ""{
+            return Err(Error::new(ErrorKind::Other, format!("KeyFile and CertFile must both be present[key: {}, cert: {}", self.key_file, self.cert_file)));
+        }
+        self.logger = default_logger();
+        let cert = new_cert(&self.cert_file.clone(), &self.key_file.clone(), self.parse_func.clone());
+        if cert.is_err(){
+            return Err(Error::new(ErrorKind::Other, format!("cannot new cert file, reason =>{}", cert.err().unwrap().to_string())));
+        }
+
+        if (self.client_key_file=="") != (self.client_cert_file==""){
+            return Err(Error::new(ErrorKind::Other, format!("ClientKeyFile and ClientCertFile must both be present[key: {}, cert: {}", self.client_key_file, self.client_cert_file)));
+        }
+
+        if self.client_cert_file != ""{
+            let cert_client = new_cert(&self.client_cert_file.clone(), &self.client_key_file.clone(), self.parse_func.clone());
+            if cert_client.is_err() {
+                return Err(Error::new(ErrorKind::Other, format!("cannot new client cert file, reason =>{}", cert_client.err().unwrap().to_string())));
+            }
+        }
+        let mut tls_build = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        // tls_build.set_servername_callback(self.server_name.clone());
+        tls_build.set_servername_callback(move |ssl, _| {
+            if let Err(e) = ssl.set_hostname(self.server_name.clone().as_str()) {
+                error!(self.logger,"Error setting servername: {}", e);
+            }
+            Ok(())
+        });
+        tls_build.set_min_proto_version(Option::from(SslVersion::TLS1_2)).unwrap();
+        // let verify_certificate: fn(cert:&X509) -> bool;
+        type VerifyCertificateFn = dyn Fn(&X509) -> bool;
+        if self.cipher_suites.len() >0 {
+            tls_build.set_ciphersuites(self.cipher_suites.as_str()).unwrap();
+        }
+        if self.allowed_cn != ""{
+            if self.allowed_hostname !=""{
+                return Err(Error::new(ErrorKind::Other, format!("AllowedCN and AllowedHostname are mutually exclusive (cn={}, hostname={}",self.allowed_cn, self.allowed_hostname)));
+            }
+            let verify_certificate: VerifyCertificateFn = |cert: &X509| -> bool {
+               return  self.allowed_cn == cert.subject_name()
+                    .entries_by_nid(Nid::COMMONNAME)
+                    .next()
+                    .unwrap()
+                    .data()
+                    .as_utf8()
+                    .unwrap()
+                    .to_string()
+            };
+        }
+        return  Ok((TLSInfo::new()))
 
     }
 }
