@@ -13,10 +13,12 @@ use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
-use openssl::ssl::{SslAcceptor, SslContextBuilder, SslMethod, SslVersion};
-use openssl::x509::{X509, X509Builder, X509Extension, X509NameBuilder, X509StoreContext};
+use openssl::ssl::{SslAcceptor, SslContextBuilder, SslMethod, SslRef, SslVersion};
+use openssl::x509::{X509, X509Builder, X509Extension, X509NameBuilder, X509StoreContext, X509VerifyResult};
 use openssl::x509::extension::{ExtendedKeyUsage, KeyUsage, SubjectAlternativeName};
+use openssl::x509::verify::X509VerifyParam;
 use rand::{Rng, thread_rng};
+use rand::distributions::uniform::SampleBorrow;
 use slog::{error, info, Logger, warn};
 use crate::pkg::fileutil::fileutil::torch_dir_all;
 use crate::pkg::tlsutil::default_logger;
@@ -203,7 +205,7 @@ impl TLSInfo{
     }
 
     // baseConfig is called on initial TLS handshake start.
-    pub fn base_config(&mut self) ->Result<TLSInfo,Error>{
+    pub fn base_config(&mut self) ->Result<(),Error>{
         if self.key_file == "" || self.cert_file == ""{
             return Err(Error::new(ErrorKind::Other, format!("KeyFile and CertFile must both be present[key: {}, cert: {}", self.key_file, self.cert_file)));
         }
@@ -225,25 +227,29 @@ impl TLSInfo{
         }
         let mut tls_build = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
         // tls_build.set_servername_callback(self.server_name.clone());
-        let server_name = std::mem::replace(&mut self.server_name.clone(), String::new()).as_str();
+        let server_name = Arc::new(self.server_name.clone());
+
         tls_build.set_servername_callback(move |ssl, _| {
-            if let Err(e) = ssl.set_hostname(server_name) {
+            if let Err(e) = ssl.set_hostname(server_name.as_str()) {
                 error!(default_logger(),"Error setting servername: {}", e);
             }
             Ok(())
         });
         tls_build.set_min_proto_version(Option::from(SslVersion::TLS1_2)).unwrap();
         // let verify_certificate: fn(cert:&X509) -> bool;
-        type VerifyCertificateFn = Arc<dyn Fn(&X509) -> bool + Send + Sync>;
+        // type VerifyCertificateFn = dyn Fn(&X509) -> bool + Send + Sync;
         if self.cipher_suites.len() >0 {
             tls_build.set_ciphersuites(self.cipher_suites.as_str()).unwrap();
         }
+
+        let mut verify_certificate;
         if self.allowed_cn != ""{
             if self.allowed_hostname !=""{
                 return Err(Error::new(ErrorKind::Other, format!("AllowedCN and AllowedHostname are mutually exclusive (cn={}, hostname={}",self.allowed_cn, self.allowed_hostname)));
             }
-            let verify_certificate: VerifyCertificateFn = Arc::new(|cert: &X509| -> bool {
-               return  self.allowed_cn == cert.subject_name()
+            let allowed_cn = Arc::new(self.allowed_cn.to_string());
+            verify_certificate = |cert: &X509| -> bool {
+               return allowed_cn.to_string() == cert.subject_name()
                     .entries_by_nid(Nid::COMMONNAME)
                     .next()
                     .unwrap()
@@ -251,9 +257,21 @@ impl TLSInfo{
                     .as_utf8()
                     .unwrap()
                     .to_string()
-            });
+            };
         }
-        return  Ok((TLSInfo::new()))
+        let mut verify_certificate_host_name;
+        if self.allowed_hostname != ""{
+            verify_certificate_host_name = |cert: &X509| -> bool {
+                let param = X509VerifyParam::new().unwrap();
+                // let x = self.allowed_hostname;
+                for name in cert.subject_alt_names().unwrap() {
+                    name.ipaddress()
+                    self.allowed_hostname.contains(name.dnsname().unwrap());
+                };
+                return true
+            }
+        }
+        return  Ok(())
 
     }
 }
@@ -281,7 +299,7 @@ mod tests{
     #[test]
     fn test_self_cert(){
         let mut tls_info = TLSInfo::new();
-        let hosts = vec!["127.0.0.1:0"];
+        let hosts = vec!["127.0.0.1"];
         let dirpath = "/tmp/test_self_cert";
         let self_signed_cert_validity = 365;
         let mut binding = ExtendedKeyUsage::new();
@@ -292,10 +310,6 @@ mod tests{
 
     #[test]
     fn test_self_cert_res(){
-        let cert_file = File::open("/tmp/test_self_cert/cert.pem").unwrap();
-        let cert_reader = BufReader::new(cert_file);
-        let cert = X509::from_pem(cert_reader.buffer()).unwrap();
-        let text = cert.to_text().unwrap();
-        println!("{:?}", text);
+
     }
 }
