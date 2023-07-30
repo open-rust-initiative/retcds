@@ -14,7 +14,7 @@ use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
-use openssl::ssl::{SslAcceptor, SslContextBuilder, SslMethod, SslRef, SslVerifyMode, SslVersion};
+use openssl::ssl::{SslAcceptor, SslAcceptorBuilder, SslContextBuilder, SslMethod, SslRef, SslVerifyMode, SslVersion};
 use openssl::x509::{X509, X509Builder, X509Extension, X509NameBuilder, X509StoreContext, X509VerifyResult};
 use openssl::x509::extension::{ExtendedKeyUsage, KeyUsage, SubjectAlternativeName};
 use rand::{Rng, thread_rng};
@@ -22,7 +22,7 @@ use rand::distributions::uniform::SampleBorrow;
 use slog::{error, info, Logger, warn};
 use crate::pkg::fileutil::fileutil::torch_dir_all;
 use crate::pkg::tlsutil::default_logger;
-use crate::pkg::tlsutil::tlsutil::new_cert;
+use crate::pkg::tlsutil::tlsutil::{new_cert, new_name_list};
 
 #[derive(Clone)]
 struct TLSInfo {
@@ -205,7 +205,7 @@ impl TLSInfo{
     }
 
     // baseConfig is called on initial TLS handshake start.
-    pub fn base_config(&mut self) ->Result<(),Error>{
+    pub fn base_config(&mut self) ->Result<SslAcceptorBuilder,Error>{
         if self.key_file == "" || self.cert_file == ""{
             return Err(Error::new(ErrorKind::Other, format!("KeyFile and CertFile must both be present[key: {}, cert: {}", self.key_file, self.cert_file)));
         }
@@ -290,9 +290,42 @@ impl TLSInfo{
             ssl.set_certificate(cert.context().certificate().unwrap()).unwrap();
             Ok(())
         });
-        Ok(())
+
+        Ok(tls_build)
 
     }
+
+    // cafiles returns a list of CA file paths.
+    pub fn cafiles(&self) -> Result<Vec<String>,Error>{
+        let mut cafiles = vec![];
+        if self.trusted_ca_file != ""{
+            cafiles.push(self.trusted_ca_file.clone());
+        }
+        return Ok(cafiles);
+    }
+
+    // ServerConfig generates a tls.Config object for use by an HTTP server.
+    pub fn server(&mut self) -> Result<SslAcceptorBuilder,Error>{
+        let mut cfg = self.base_config().expect("base config error");
+        self.logger = default_logger();
+        cfg.set_verify(SslVerifyMode::NONE);
+
+        if self.trusted_ca_file!="" || self.client_cert_auth {
+            cfg.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+        }
+
+        let cs =self.cafiles().expect("cafiles error");
+
+        if cs.len() > 0{
+            info!(self.logger, "Loading cert pool {}",cs.join(","));
+            info!(self.logger,"tlsinfo => {}",self.string());
+            let cp = new_name_list(cs.as_slice()).expect("new ca list error");
+            cfg.set_client_ca_list(cp)
+        };
+
+
+    }
+
 }
 
 #[cfg(test)]

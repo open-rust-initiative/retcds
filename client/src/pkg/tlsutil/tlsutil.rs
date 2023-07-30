@@ -1,39 +1,24 @@
 use std::fs::read;
-use std::io::{BufReader, Cursor};
 use std::path::Path;
 use openssl::error::ErrorStack;
 use openssl::ssl::{SslAcceptor, SslFiletype, SslMethod};
-use openssl::x509::store::X509StoreBuilder;
-use openssl::x509::X509;
+use openssl::stack::Stack;
+use openssl::x509::{X509, X509Name};
 
 
-pub fn new_cert_pool(ca_files: &[String]) -> Result<X509StoreBuilder, ErrorStack> {
-    let mut cert_store = X509StoreBuilder::new();
+pub fn new_name_list(ca_files: &[String]) -> Result<Stack<X509Name>, ErrorStack> {
 
+    let mut res = Stack::new().unwrap();
     for ca_file in ca_files {
-        let ca_file_contents = read(Path::new(ca_file));
-
-        if ca_file_contents.is_err() {
-            return Err(ErrorStack::get());
-        }
-
-
-        let mut ca_file_reader = BufReader::new(Cursor::new(ca_file_contents.unwrap()));
-
-        loop {
-            let pem_result = pem::parse(ca_file_reader.get_mut().get_ref());
-            if let Ok(pem) = pem_result {
-                if pem.tag()== "CERTIFICATE" {
-                    let cert = X509::from_pem(&pem.contents())?;
-                    cert_store.as_mut().unwrap().add_cert(cert)?;
-                }
-            } else {
-                break;
+        let name = X509Name::load_client_ca_file(ca_file).unwrap();
+        for na in name {
+            let push = res.push(na);
+            if push.is_err() {
+                return Err(ErrorStack::get());
             }
         }
     }
-
-    Ok(cert_store.unwrap())
+    return Ok(res);
 }
 
 
@@ -62,7 +47,7 @@ mod tests{
     use slog::info;
     use tempfile::NamedTempFile;
     use crate::pkg::tlsutil::default_logger;
-    use crate::pkg::tlsutil::tlsutil::{new_cert, new_cert_pool};
+    use crate::pkg::tlsutil::tlsutil::{new_cert};
 
     #[test]
     fn test_new_cert_pool(){
