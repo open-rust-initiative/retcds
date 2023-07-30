@@ -10,11 +10,12 @@ use num_bigint::{BigUint, ToBigUint};
 use openssl::asn1::{Asn1Integer, Asn1IntegerRef, Asn1Time};
 use openssl::bn::BigNum;
 use openssl::ec::{EcGroup, EcKey};
+use openssl::envelope::Open;
 use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
-use openssl::ssl::{SslAcceptor, SslAcceptorBuilder, SslContextBuilder, SslMethod, SslRef, SslVerifyMode, SslVersion};
+use openssl::ssl::{SslAcceptor, SslAcceptorBuilder, SslConnector, SslConnectorBuilder, SslContextBuilder, SslMethod, SslRef, SslVerifyMode, SslVersion};
 use openssl::x509::{X509, X509Builder, X509Extension, X509NameBuilder, X509StoreContext, X509VerifyResult};
 use openssl::x509::extension::{ExtendedKeyUsage, KeyUsage, SubjectAlternativeName};
 use rand::{Rng, thread_rng};
@@ -205,7 +206,7 @@ impl TLSInfo{
     }
 
     // baseConfig is called on initial TLS handshake start.
-    pub fn base_config(&mut self) ->Result<SslAcceptorBuilder,Error>{
+    pub fn base_config_server(&mut self) ->Result<SslAcceptorBuilder,Error>{
         if self.key_file == "" || self.cert_file == ""{
             return Err(Error::new(ErrorKind::Other, format!("KeyFile and CertFile must both be present[key: {}, cert: {}", self.key_file, self.cert_file)));
         }
@@ -295,6 +296,95 @@ impl TLSInfo{
 
     }
 
+    pub fn base_config_client(&mut self) -> Result<SslConnectorBuilder,Error>{
+        if self.key_file == "" || self.cert_file == ""{
+            return Err(Error::new(ErrorKind::Other, format!("KeyFile and CertFile must both be present[key: {}, cert: {}", self.key_file, self.cert_file)));
+        }
+        self.logger = default_logger();
+        let cert = new_cert(&self.cert_file.clone(), &self.key_file.clone(), self.parse_func.clone());
+        if cert.is_err(){
+            return Err(Error::new(ErrorKind::Other, format!("cannot new cert file, reason =>{}", cert.err().unwrap().to_string())));
+        }
+
+        if (self.client_key_file=="") != (self.client_cert_file==""){
+            return Err(Error::new(ErrorKind::Other, format!("ClientKeyFile and ClientCertFile must both be present[key: {}, cert: {}", self.client_key_file, self.client_cert_file)));
+        }
+
+        if self.client_cert_file != ""{
+            let cert_client = new_cert(&self.client_cert_file.clone(), &self.client_key_file.clone(), self.parse_func.clone());
+            if cert_client.is_err() {
+                return Err(Error::new(ErrorKind::Other, format!("cannot new client cert file, reason =>{}", cert_client.err().unwrap().to_string())));
+            }
+        }
+        let mut tls_build = SslConnector::builder(SslMethod::tls()).unwrap();
+        tls_build.set_min_proto_version(Option::from(SslVersion::TLS1_2)).unwrap();
+        if self.cipher_suites.len() >0 {
+            tls_build.set_ciphersuites(self.cipher_suites.as_str()).unwrap();
+        }
+
+        if self.allowed_cn != ""{
+            if self.allowed_hostname !=""{
+                return Err(Error::new(ErrorKind::Other, format!("AllowedCN and AllowedHostname are mutually exclusive (cn={}, hostname={}",self.allowed_cn, self.allowed_hostname)));
+            }
+            let allowed_cn = Arc::new(self.allowed_cn.to_string());
+
+            tls_build.set_verify_callback(SslVerifyMode::PEER, move |preverify_ok, x509_ctx| {
+                let cert = x509_ctx.current_cert();
+                if cert.is_none(){
+                    return false;
+                }
+                let cert = cert.unwrap();
+                let cn = cert.subject_name()
+                    .entries_by_nid(Nid::COMMONNAME)
+                    .next()
+                    .unwrap()
+                    .data()
+                    .as_utf8()
+                    .unwrap()
+                    .to_string();
+                if cn != *allowed_cn {
+                    return false;
+                }
+                return preverify_ok;
+            });
+        }
+
+        if self.allowed_hostname != ""{
+            let allowed_hostname = self.allowed_hostname.clone();
+            tls_build.set_verify_callback(SslVerifyMode::PEER, move |preverify_ok, x509_ctx| {
+                let cert = x509_ctx.current_cert().unwrap();
+                if let Ok(ip) = allowed_hostname.clone().parse::<IpAddr>() {
+                    for name in cert.subject_alt_names().unwrap() {
+                        let str = String::from_utf8(name.ipaddress().unwrap().to_vec()).unwrap();
+                        if str.contains(&allowed_hostname.clone()) == true{
+                            return true
+                        }
+                    }
+                } else {
+                    for name in cert.subject_alt_names().unwrap() {
+                        if name.dnsname().unwrap().contains(&allowed_hostname.clone()) == true{
+                            return true
+                        }
+                    }
+                }
+
+                return preverify_ok;
+            });
+        }
+
+        // let server_name = Arc::new(self.server_name.clone());
+        let cert_file = self.cert_file.clone();
+        let key_file = self.key_file.clone();
+        let parse_func = self.parse_func.clone();
+        tls_build.set_servername_callback(move |ssl, _| {
+            let cert = new_cert(&cert_file, &key_file, parse_func).unwrap();
+            ssl.set_certificate(cert.context().certificate().unwrap()).unwrap();
+            Ok(())
+        });
+
+        Ok(tls_build)
+    }
+
     // cafiles returns a list of CA file paths.
     pub fn cafiles(&self) -> Result<Vec<String>,Error>{
         let mut cafiles = vec![];
@@ -305,8 +395,8 @@ impl TLSInfo{
     }
 
     // ServerConfig generates a tls.Config object for use by an HTTP server.
-    pub fn server(&mut self) -> Result<SslAcceptorBuilder,Error>{
-        let mut cfg = self.base_config().expect("base config error");
+    pub fn server_config(&mut self) -> Result<SslAcceptorBuilder,Error>{
+        let mut cfg = self.base_config_server().expect("base config error");
         self.logger = default_logger();
         cfg.set_verify(SslVerifyMode::NONE);
 
@@ -322,10 +412,42 @@ impl TLSInfo{
             let cp = new_name_list(cs.as_slice()).expect("new ca list error");
             cfg.set_client_ca_list(cp)
         };
+        cfg.set_alpn_protos(b"\x02h2").unwrap();
 
+        cfg.set_max_proto_version(Option::from(SslVersion::TLS1_2)).unwrap();
 
+        return Ok(cfg);
     }
 
+    // ClientConfig generates a tls.Config object for use by an HTTP client.
+    pub fn client_config(&mut self) -> Result<SslConnectorBuilder,Error>{
+        let mut cfg :SslConnectorBuilder;
+        if !self.empty(){
+            cfg = self.base_config_client().expect("base client config error");
+        }
+        else {
+            let server_name = self.server_name.clone();
+            cfg.set_servername_callback(move |ssl, _| {
+                ssl.set_hostname(server_name.as_str()).unwrap();
+                return Ok(());
+        });
+        }
+        if self.insecure_skip_verify{
+            cfg.set_verify(SslVerifyMode::NONE);
+        }
+        else {
+            cfg.set_verify(SslVerifyMode::PEER);
+        }
+
+        if self.empty_cn{
+            let has_no_empty_cn= false;
+            let mut cn = "";
+            new_cert(&self.cert_file.clone(), &self.key_file.clone(), Option::from(move |cert:&[u8], key:&[u8]| -> Result<SslAcceptor, ErrorStack>>{
+                
+            }));
+        }
+        return Ok(cfg.unwrap());
+    }
 }
 
 #[cfg(test)]

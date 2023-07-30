@@ -47,13 +47,13 @@ mod tests{
     use slog::info;
     use tempfile::NamedTempFile;
     use crate::pkg::tlsutil::default_logger;
-    use crate::pkg::tlsutil::tlsutil::{new_cert};
+    use crate::pkg::tlsutil::tlsutil::{new_cert, new_name_list};
 
     #[test]
     fn test_new_cert_pool(){
         let ca_files = vec!["invalid_path1".to_string(), "invalid_path2".to_string()];
 
-        let result = new_cert_pool(&ca_files);
+        let result = new_name_list(&ca_files);
         assert!(result.is_err());
     }
 
