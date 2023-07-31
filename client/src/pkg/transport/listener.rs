@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fmt::Pointer;
 use std::fs::{canonicalize, File, Permissions, set_permissions};
 use std::io::{Error, ErrorKind, Write};
@@ -24,6 +25,8 @@ use slog::{error, info, Logger, warn};
 use crate::pkg::fileutil::fileutil::torch_dir_all;
 use crate::pkg::tlsutil::default_logger;
 use crate::pkg::tlsutil::tlsutil::{new_cert, new_name_list};
+use std::os::fd::AsRawFd;
+
 
 #[derive(Clone)]
 struct TLSInfo {
@@ -443,6 +446,9 @@ impl TLSInfo{
         if self.empty_cn{
             let mut has_no_empty_cn = false;
             let mut cn = String::new();
+            // let cn = Arc::new(RefCell::new(String::new()));
+            let key_file =&self.clone().key_file;
+            let cert_file = &self.clone().cert_file;
             let _ = new_cert(&self.cert_file.clone(), &self.key_file.clone(), Some(move |cert:&[u8], key:&[u8]| -> Result<SslAcceptor, ErrorStack> {
                 let x509_cert = X509::from_pem(cert).expect("cannot parse cert");
                 let entries = x509_cert.subject_name().entries_by_nid(Nid::COMMONNAME);
@@ -454,12 +460,13 @@ impl TLSInfo{
                     }
                 };
                 let mut tls_build = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-                tls_build.set_private_key_file(&self.clone().key_file, SslFiletype::PEM).unwrap();
-                tls_build.set_certificate_chain_file(&self.clone().cert_file).unwrap();
+                tls_build.set_private_key_file(key_file, SslFiletype::PEM).unwrap();
+                tls_build.set_certificate_chain_file(cert_file).unwrap();
                 Ok(tls_build.build())
             }));
+
             if has_no_empty_cn {
-                return Err(Error::new(ErrorKind::Other, format!("cert has non-empty CN {}, but --empty-cn is set cert_file => {}", cn, self.clone().cert_file)));
+                return Err(Error::new(ErrorKind::Other, format!("cert has non-empty CN , but --empty-cn is set cert_file => {}", self.clone().cert_file)));
             }
         }
         cfg.set_max_proto_version(Option::from(SslVersion::TLS1_2)).unwrap();
@@ -482,8 +489,6 @@ mod tests{
         let num = BigNum::from_slice(serial_number.to_bytes_le().as_slice()).unwrap();
         let x = Asn1Integer::from_bn(&num).unwrap();
         let key_usage = KeyUsage::new().key_encipherment().digital_signature().build().unwrap();
-
-
         println!("{}", x.to_bn().unwrap().to_string());
     }
 
