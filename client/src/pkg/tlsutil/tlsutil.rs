@@ -21,13 +21,25 @@ pub fn new_name_list(ca_files: &[String]) -> Result<Stack<X509Name>, ErrorStack>
     return Ok(res);
 }
 
+pub fn new_cert_default(certfile: &str, keyfile: &str) -> Result<SslAcceptor, ErrorStack> {
+    let cert = read(Path::new(certfile)).unwrap();
+    let key = read(Path::new(keyfile)).unwrap();
+    let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls())?;
+    builder.set_private_key_file(keyfile, SslFiletype::PEM)?;
+    builder.set_certificate_chain_file(certfile)?;
+    // builder.build();
+
+    Ok(builder.build())
+
+}
 
 
-pub fn new_cert(certfile: &str, keyfile: &str, parse_func: Option<fn(&[u8], &[u8]) -> Result<SslAcceptor, ErrorStack>>) -> Result<SslAcceptor, ErrorStack> {
+
+pub fn new_cert(certfile: &str, keyfile: &str, parse_func: Option<impl FnMut(&[u8], &[u8]) -> Result<SslAcceptor, ErrorStack>>) -> Result<SslAcceptor, ErrorStack>{
     let cert = read(Path::new(certfile)).unwrap();
     let key = read(Path::new(keyfile)).unwrap();
 
-    let acceptor = if let Some(parse_func) = parse_func {
+    let acceptor = if let Some(mut parse_func) = parse_func {
         parse_func(&cert, &key)?
     } else {
         let mut builder = SslAcceptor::mozilla_intermediate(SslMethod::tls())?;
@@ -47,7 +59,7 @@ mod tests{
     use slog::info;
     use tempfile::NamedTempFile;
     use crate::pkg::tlsutil::default_logger;
-    use crate::pkg::tlsutil::tlsutil::{new_cert, new_name_list};
+    use crate::pkg::tlsutil::tlsutil::{new_cert, new_cert_default, new_name_list};
 
     #[test]
     fn test_new_cert_pool(){
@@ -61,7 +73,7 @@ mod tests{
     fn test_new_cert_with_default_parser() {
         let certfile = "test_cert.crt";
         let keyfile = "test_key.key";
-        let result = new_cert(certfile, keyfile, None);
+        let result = new_cert_default(certfile, keyfile);
         assert!(result.is_ok());
     }
 
@@ -78,7 +90,7 @@ mod tests{
         key_file.write_all(key_contents).unwrap();
 
         // 调用被测试函数。
-        let acceptor = new_cert(cert_path.to_str().unwrap(), key_path.to_str().unwrap(), None);
+        let acceptor = new_cert_default(cert_path.to_str().unwrap(), key_path.to_str().unwrap());
 
         // info!(default_logger(),"{}",acceptor.unwrap().context().session_cache_size())
 
