@@ -20,3 +20,6 @@ tempfile = "3.2.0"
 nix = "0.26"
 rand = "0.8"
 num-bigint = "0.4"
+tokio-rustls = "0.24"
+tokio = { version = "1", features = ["full"] }
+rustls-pemfile = "1"
