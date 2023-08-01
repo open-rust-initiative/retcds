@@ -137,8 +137,8 @@ mod tests {
     const CA_FILE: &str = "/root/GolandProjects/retcds/client/src/pkg/transport/dev/ca.cert";
     const CLIENT_CERT_FILE: &str = "/root/GolandProjects/retcds/client/src/pkg/transport/dev/client.cert";
     const CLIENT_KEY_FILE: &str = "/root/GolandProjects/retcds/client/src/pkg/transport/dev/client.key";
-    const SERVER_CERT_FILE: &str = "/root/GolandProjects/retcds/client/src/pkg/transport/dev/server.cert";
-    const SERVER_KEY_FILE: &str = "/root/GolandProjects/retcds/client/src/pkg/transport/dev/server.key";
+    const SERVER_CERT_FILE: &str = "/root/GolandProjects/retcds/client/src/pkg/transport/dev/server.fullchain";
+    const SERVER_KEY_FILE: &str = "/root/GolandProjects/retcds/client/src/pkg/transport/dev/server.rsa";
 
     #[tokio::test]
     async fn tls() {
@@ -157,6 +157,7 @@ mod tests {
 
         tokio::spawn(async move {
             let (stream, _peer_addr) = listener.accept().await.unwrap();
+            println!("{}", _peer_addr.to_string());
             let mut tls_stream = tls_acceptor.accept(stream).await.unwrap();
             println!("server: Accepted client conn with TLS");
 
