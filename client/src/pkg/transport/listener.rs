@@ -1,35 +1,47 @@
-use std::cell::RefCell;
 use std::fmt::Pointer;
-use std::fs::{canonicalize, File, Permissions, set_permissions};
+use std::fs::{File, Permissions, set_permissions};
 use std::io::{Error, ErrorKind, Write};
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::ops::{Deref, Shl};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use num_bigint::{BigUint, ToBigUint};
-use openssl::asn1::{Asn1Integer, Asn1IntegerRef, Asn1Time};
+use openssl::asn1::{Asn1Integer, Asn1Time};
 use openssl::bn::BigNum;
 use openssl::ec::{EcGroup, EcKey};
-use openssl::envelope::Open;
 use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
-use openssl::ssl::{SslAcceptor, SslAcceptorBuilder, SslConnector, SslConnectorBuilder, SslContextBuilder, SslFiletype, SslMethod, SslRef, SslVerifyMode, SslVersion};
-use openssl::x509::{X509, X509Builder, X509Extension, X509NameBuilder, X509StoreContext, X509VerifyResult};
+use openssl::ssl::{SslAcceptor, SslAcceptorBuilder, SslConnector, SslConnectorBuilder, SslMethod, SslVerifyMode, SslVersion};
+use openssl::x509::{X509Builder, X509NameBuilder};
 use openssl::x509::extension::{ExtendedKeyUsage, KeyUsage, SubjectAlternativeName};
 use rand::{Rng, thread_rng};
 use rand::distributions::uniform::SampleBorrow;
-use slog::{error, info, Logger, warn};
+use slog::{info, Logger, warn};
 use crate::pkg::fileutil::fileutil::torch_dir_all;
 use crate::pkg::tlsutil::default_logger;
-use crate::pkg::tlsutil::tlsutil::{new_cert, new_name_list};
+use crate::pkg::tlsutil::tlsutil::{new_cert};
 use std::os::fd::AsRawFd;
-
+use std::convert::TryFrom;
+use std::io::BufReader;
+use openssl_sys::RSA;
+use rustls::{RootCertStore, server::{AllowAnyAuthenticatedClient}, SupportedCipherSuite};
+use rustls::internal::msgs::codec::Codec;
+use rustls_pemfile::Item::RSAKey;
+use rustls_pemfile::read_one;
+use tokio::io;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::{
+    TlsAcceptor,
+    TlsConnector,
+    rustls::{self},
+    client::TlsStream as ClientTlsStream,
+};
 
 #[derive(Clone)]
-struct TLSInfo {
+pub struct TLSInfo {
     // CertFile is the _server_ cert, it will also be used as a _client_ certificate if ClientCertFile is empty
     cert_file: String,
     // KeyFile is the key for the CertFile
@@ -54,10 +66,7 @@ struct TLSInfo {
     handshake_failure: Option<fn(&[u8], &[u8]) -> Result<SslAcceptor, ErrorStack>>,
 
     // CipherSuites is a list of supported cipher suites.
-    // If empty, Go auto-populates it by default.
-    // Note that cipher suites are prioritized in the given order.
-    // cipher_suites: Vec<u16>,
-    cipher_suites: String,
+    cipher_suites: Vec<SupportedCipherSuite>,
 
     self_cert: bool,
 
@@ -95,7 +104,7 @@ impl TLSInfo{
             skip_clientSAN_verify: false,
             server_name: String::from(""),
             handshake_failure: None,
-            cipher_suites: String::from(""),
+            cipher_suites: rustls::ALL_CIPHER_SUITES.to_vec(),
             self_cert: false,
             parse_func: None,
             allowed_cn: String::from(""),
@@ -110,282 +119,13 @@ impl TLSInfo{
     pub fn empty(&self) -> bool{
         return self.cert_file == "" && self.key_file == ""
     }
-    pub fn self_cert(&mut self, dirpath:&str, hosts:Vec<&str>, self_signed_cert_validity:usize, additional_usages:Option<&mut ExtendedKeyUsage>) -> Result<TLSInfo,Error>{
-        self.logger = default_logger();
-        if self_signed_cert_validity == 0{
-            warn!(self.logger, "selfSignedCertValidity is invalid,it should be greater than 0,cannot generate cert");
-            return Err(Error::new(ErrorKind::Other, "cannot generate cert"));
-        };
-        torch_dir_all(dirpath).expect("torch dir error");
-        let mut cert_file = PathBuf::new().join(dirpath).join("cert.pem");
-        let mut abs_cert_file = cert_file.clone();
-        let mut key_file = PathBuf::new().join(dirpath).join("key.pem");
-        let mut abs_key_file = key_file.clone();
-        // abs_key_file.push("key.pem");
 
-        if abs_key_file.exists() && abs_cert_file.exists(){
-            self.cert_file = abs_cert_file.clone().to_str().unwrap().to_string();
-            self.key_file = abs_key_file.clone().to_str().unwrap().to_string();
-            self.client_cert_file = abs_cert_file.clone().to_str().unwrap().to_string();
-            self.client_key_file = abs_key_file.clone().to_str().unwrap().to_string();
-            self.self_cert = true;
-            return Ok(self.clone());
-        }
-
-
-        let mut rng = thread_rng();
-        let serial_number_limit: BigUint = BigUint::from(1_u128).shl(128);
-        let serial_number: BigUint = BigUint::from_bytes_le(&rng.gen::<[u8; 16]>()) % &serial_number_limit;
-        if serial_number == BigUint::from(0_u128){
-            warn!(self.logger, "serial number is 0, cannot generate cert");
-            return Err(Error::new(ErrorKind::Other, "cannot generate cert"));
-        }
-
-
-        let mut name = X509NameBuilder::new().unwrap();
-        name.append_entry_by_nid(Nid::ORGANIZATIONNAME,"etcd").unwrap();
-        let key_usage = KeyUsage::new().key_encipherment().digital_signature().build().unwrap();
-        let ext_key_usage = ExtendedKeyUsage::new().server_auth().build().unwrap();
-        let num = BigNum::from_slice(serial_number.to_bytes_le().as_slice()).unwrap();
-        let mut build = X509Builder::new().unwrap();
-        build.set_serial_number(Asn1Integer::from_bn(&num).unwrap().as_ref()).unwrap();
-        build.set_subject_name(name.build().as_ref()).unwrap();
-        build.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
-        let after =&Asn1Time::days_from_now(self_signed_cert_validity as u32).unwrap();
-        build.set_not_after(&after.clone()).unwrap();
-        build.append_extension(key_usage).unwrap();
-        if additional_usages.is_some(){
-            build.append_extension(additional_usages.unwrap().server_auth().build().unwrap()).unwrap()
-        }
-        else {
-            build.append_extension(ext_key_usage).unwrap();
-        };
-        info!(default_logger(),"automatically generate certificates,certificate-validity-bound-not-after =>{}",after.clone().to_string());
-
-        let mut ext_builder = SubjectAlternativeName::new();
-        for host in hosts.clone() {
-            if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-                ext_builder.ip(&ip.to_string());
-            } else {
-                ext_builder.dns(host);
-            }
-        }
-        let ext = ext_builder.build(&build.x509v3_context(None, None)).unwrap();
-        build.append_extension(ext).unwrap();
-
-        let group = EcGroup::from_curve_name(Nid::SECP521R1).unwrap();
-        let ecdsa = EcKey::generate(&group);
-        if ecdsa.clone().is_err(){
-            warn!(default_logger(),"cannot generate ecdsa key, reason =>{}",ecdsa.clone().err().unwrap());
-            return Err(Error::new(ErrorKind::Other, "cannot generate ecdsa key"));
-        }
-
-        let priv_key = PKey::from_ec_key(ecdsa.clone().unwrap()).unwrap();
-        build.set_pubkey(priv_key.clone().as_ref()).unwrap();
-        build.sign(priv_key.clone().as_ref(), MessageDigest::sha256()).unwrap();
-        let mut cert = build.build();
-        let pem = cert.to_pem();
-        if pem.is_err(){
-            warn!(default_logger(),"cannot generate pem, reason =>{}",pem.clone().err().unwrap());
-            return Err(Error::new(ErrorKind::Other, "cannot generate pem"));
-        }
-        let cert_out = File::create(cert_file.clone()).unwrap()
-            .write_all(cert.to_pem().unwrap().as_slice());
-
-
-        if cert_out.is_err() {
-            warn!(default_logger(),"cannot write cert file, reason =>{}",cert_out.err().unwrap().to_string().clone());
-            return Err(Error::new(ErrorKind::Other, "cannot write cert file"));
-        }
-
-        let key_out = File::create(key_file.clone()).unwrap()
-            .write_all(&ecdsa.unwrap().private_key_to_pem().unwrap());
-        if key_out.is_err() {
-            warn!(default_logger(),"cannot write key file, reason =>{}",key_out.err().unwrap().to_string().clone());
-            return Err(Error::new(ErrorKind::Other, "cannot write key file"));
-        }
-        set_permissions(key_file.clone(),Permissions::from_mode(0o600)).unwrap();
-        return self.self_cert(dirpath.clone(), hosts.clone(), self_signed_cert_validity.clone(), None);
+    pub fn get_key_file(&self) -> String{
+        return self.key_file.clone();
     }
 
-    // baseConfig is called on initial TLS handshake start.
-    pub fn base_config_server(&mut self) ->Result<SslAcceptorBuilder,Error>{
-        if self.key_file == "" || self.cert_file == ""{
-            return Err(Error::new(ErrorKind::Other, format!("KeyFile and CertFile must both be present[key: {}, cert: {}", self.key_file, self.cert_file)));
-        }
-        self.logger = default_logger();
-        let cert = new_cert(&self.cert_file.clone(), &self.key_file.clone(), self.parse_func.clone());
-        if cert.is_err(){
-            return Err(Error::new(ErrorKind::Other, format!("cannot new cert file, reason =>{}", cert.err().unwrap().to_string())));
-        }
-
-        if (self.client_key_file=="") != (self.client_cert_file==""){
-            return Err(Error::new(ErrorKind::Other, format!("ClientKeyFile and ClientCertFile must both be present[key: {}, cert: {}", self.client_key_file, self.client_cert_file)));
-        }
-
-        if self.client_cert_file != ""{
-            let cert_client = new_cert(&self.client_cert_file.clone(), &self.client_key_file.clone(), self.parse_func.clone());
-            if cert_client.is_err() {
-                return Err(Error::new(ErrorKind::Other, format!("cannot new client cert file, reason =>{}", cert_client.err().unwrap().to_string())));
-            }
-        }
-        let mut tls_build = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-        tls_build.set_min_proto_version(Option::from(SslVersion::TLS1_2)).unwrap();
-        if self.cipher_suites.len() >0 {
-            tls_build.set_ciphersuites(self.cipher_suites.as_str()).unwrap();
-        }
-
-        if self.allowed_cn != ""{
-            if self.allowed_hostname !=""{
-                return Err(Error::new(ErrorKind::Other, format!("AllowedCN and AllowedHostname are mutually exclusive (cn={}, hostname={}",self.allowed_cn, self.allowed_hostname)));
-            }
-            let allowed_cn = Arc::new(self.allowed_cn.to_string());
-
-            tls_build.set_verify_callback(SslVerifyMode::PEER, move |preverify_ok, x509_ctx| {
-                let cert = x509_ctx.current_cert();
-                if cert.is_none(){
-                    return false;
-                }
-                let cert = cert.unwrap();
-                let cn = cert.subject_name()
-                    .entries_by_nid(Nid::COMMONNAME)
-                    .next()
-                    .unwrap()
-                    .data()
-                    .as_utf8()
-                    .unwrap()
-                    .to_string();
-                if cn != *allowed_cn {
-                    return false;
-                }
-                return preverify_ok;
-            });
-        }
-
-        if self.allowed_hostname != ""{
-            let allowed_hostname = self.allowed_hostname.clone();
-            tls_build.set_verify_callback(SslVerifyMode::PEER, move |preverify_ok, x509_ctx| {
-                let cert = x509_ctx.current_cert().unwrap();
-                if let Ok(ip) = allowed_hostname.clone().parse::<IpAddr>() {
-                    for name in cert.subject_alt_names().unwrap() {
-                        let str = String::from_utf8(name.ipaddress().unwrap().to_vec()).unwrap();
-                        if str.contains(&allowed_hostname.clone()) == true{
-                            return true
-                        }
-                    }
-                } else {
-                    for name in cert.subject_alt_names().unwrap() {
-                        if name.dnsname().unwrap().contains(&allowed_hostname.clone()) == true{
-                            return true
-                        }
-                    }
-                }
-
-                return preverify_ok;
-            });
-        }
-
-        // let server_name = Arc::new(self.server_name.clone());
-        let cert_file = self.cert_file.clone();
-        let key_file = self.key_file.clone();
-        let parse_func = self.parse_func.clone();
-        tls_build.set_servername_callback(move |ssl, _| {
-            let cert = new_cert(&cert_file, &key_file, parse_func).unwrap();
-            ssl.set_certificate(cert.context().certificate().unwrap()).unwrap();
-            Ok(())
-        });
-
-        Ok(tls_build)
-
-    }
-
-    pub fn base_config_client(&mut self) -> Result<SslConnectorBuilder,Error>{
-        if self.key_file == "" || self.cert_file == ""{
-            return Err(Error::new(ErrorKind::Other, format!("KeyFile and CertFile must both be present[key: {}, cert: {}", self.key_file, self.cert_file)));
-        }
-        self.logger = default_logger();
-        let cert = new_cert(&self.cert_file.clone(), &self.key_file.clone(), self.parse_func.clone());
-        if cert.is_err(){
-            return Err(Error::new(ErrorKind::Other, format!("cannot new cert file, reason =>{}", cert.err().unwrap().to_string())));
-        }
-
-        if (self.client_key_file=="") != (self.client_cert_file==""){
-            return Err(Error::new(ErrorKind::Other, format!("ClientKeyFile and ClientCertFile must both be present[key: {}, cert: {}", self.client_key_file, self.client_cert_file)));
-        }
-
-        if self.client_cert_file != ""{
-            let cert_client = new_cert(&self.client_cert_file.clone(), &self.client_key_file.clone(), self.parse_func.clone());
-            if cert_client.is_err() {
-                return Err(Error::new(ErrorKind::Other, format!("cannot new client cert file, reason =>{}", cert_client.err().unwrap().to_string())));
-            }
-        }
-        let mut tls_build = SslConnector::builder(SslMethod::tls()).unwrap();
-        tls_build.set_min_proto_version(Option::from(SslVersion::TLS1_2)).unwrap();
-        if self.cipher_suites.len() >0 {
-            tls_build.set_ciphersuites(self.cipher_suites.as_str()).unwrap();
-        }
-
-        if self.allowed_cn != ""{
-            if self.allowed_hostname !=""{
-                return Err(Error::new(ErrorKind::Other, format!("AllowedCN and AllowedHostname are mutually exclusive (cn={}, hostname={}",self.allowed_cn, self.allowed_hostname)));
-            }
-            let allowed_cn = Arc::new(self.allowed_cn.to_string());
-
-            tls_build.set_verify_callback(SslVerifyMode::PEER, move |preverify_ok, x509_ctx| {
-                let cert = x509_ctx.current_cert();
-                if cert.is_none(){
-                    return false;
-                }
-                let cert = cert.unwrap();
-                let cn = cert.subject_name()
-                    .entries_by_nid(Nid::COMMONNAME)
-                    .next()
-                    .unwrap()
-                    .data()
-                    .as_utf8()
-                    .unwrap()
-                    .to_string();
-                if cn != *allowed_cn {
-                    return false;
-                }
-                return preverify_ok;
-            });
-        }
-
-        if self.allowed_hostname != ""{
-            let allowed_hostname = self.allowed_hostname.clone();
-            tls_build.set_verify_callback(SslVerifyMode::PEER, move |preverify_ok, x509_ctx| {
-                let cert = x509_ctx.current_cert().unwrap();
-                if let Ok(ip) = allowed_hostname.clone().parse::<IpAddr>() {
-                    for name in cert.subject_alt_names().unwrap() {
-                        let str = String::from_utf8(name.ipaddress().unwrap().to_vec()).unwrap();
-                        if str.contains(&allowed_hostname.clone()) == true{
-                            return true
-                        }
-                    }
-                } else {
-                    for name in cert.subject_alt_names().unwrap() {
-                        if name.dnsname().unwrap().contains(&allowed_hostname.clone()) == true{
-                            return true
-                        }
-                    }
-                }
-
-                return preverify_ok;
-            });
-        }
-
-        // let server_name = Arc::new(self.server_name.clone());
-        let cert_file = self.cert_file.clone();
-        let key_file = self.key_file.clone();
-        let parse_func = self.parse_func.clone();
-        tls_build.set_servername_callback(move |ssl, _| {
-            let cert = new_cert(&cert_file, &key_file, parse_func).unwrap();
-            ssl.set_certificate(cert.context().certificate().unwrap()).unwrap();
-            Ok(())
-        });
-
-        Ok(tls_build)
+    pub fn get_cert_file(&self) -> String{
+        return self.cert_file.clone();
     }
 
     // cafiles returns a list of CA file paths.
@@ -397,81 +137,242 @@ impl TLSInfo{
         return Ok(cafiles);
     }
 
-    // ServerConfig generates a tls.Config object for use by an HTTP server.
-    pub fn server_config(&mut self) -> Result<SslAcceptorBuilder,Error>{
-        let mut cfg = self.base_config_server().expect("base config error");
-        self.logger = default_logger();
-        cfg.set_verify(SslVerifyMode::NONE);
+    // ServerConfig generates a config use by an HTTP server.
+    pub fn server_config(&self) -> Arc<rustls::ServerConfig> {
+        let roots = load_certs(self.cert_file.as_str());
+        warn!(default_logger(),"{}",self.cert_file.as_str());
+        let certs = roots.clone();
 
-        if self.trusted_ca_file!="" || self.client_cert_auth {
-            cfg.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
-        }
+        let certfile = File::open(self.cert_file.as_str()).expect("cannot open certificate file");
+        let mut reader = BufReader::new(certfile);
+        let mut client_auth_roots = RootCertStore::empty();
+        // for root in roots {
+        //     client_auth_roots.add_parsable_certificates(rustls_pemfile::certs(& reader)).unwrap();
+        // }
 
-        let cs =self.cafiles().expect("cafiles error");
+        client_auth_roots.add_parsable_certificates(&rustls_pemfile::certs(&mut reader).unwrap());
+        let client_auth = AllowAnyAuthenticatedClient::new(client_auth_roots);
+        let privkey = load_private_key(self.key_file.as_str());
+        // let suites = rustls::ALL_CIPHER_SUITES.to_vec();
+        let versions = rustls::ALL_VERSIONS.to_vec();
 
-        if cs.len() > 0{
-            info!(self.logger, "Loading cert pool {}",cs.join(","));
-            info!(self.logger,"tlsinfo => {}",self.string());
-            let cp = new_name_list(cs.as_slice()).expect("new ca list error");
-            cfg.set_client_ca_list(cp)
-        };
-        cfg.set_alpn_protos(b"\x02h2").unwrap();
+        let mut config = rustls::ServerConfig::builder()
+            .with_cipher_suites(&self.cipher_suites)
+            .with_safe_default_kx_groups()
+            .with_protocol_versions(&versions)
+            .expect("inconsistent cipher-suites/versions specified")
+            .with_client_cert_verifier(client_auth.boxed())
+            .with_single_cert(certs, privkey)
+            // .with_single_cert_with_ocsp_and_sct(certs, privkey, vec![], vec![])
+            .expect("bad certificates/private key");
 
-        cfg.set_max_proto_version(Option::from(SslVersion::TLS1_2)).unwrap();
 
-        return Ok(cfg);
+        config.key_log = Arc::new(rustls::KeyLogFile::new());
+        config.session_storage = rustls::server::ServerSessionMemoryCache::new(256);
+        Arc::new(config)
     }
 
-    // ClientConfig generates a tls.Config object for use by an HTTP client.
-    pub fn client_config(&mut self) -> Result<SslConnectorBuilder,Error>{
-        let mut cfg :SslConnectorBuilder = SslConnector::builder(SslMethod::tls()).unwrap();
-        if !self.empty(){
-            cfg = self.base_config_client().expect("base client config error");
+
+    pub fn client_config(&self) -> Arc<rustls::ClientConfig> {
+
+        let mut root_store = RootCertStore::empty();
+        if self.trusted_ca_file != ""{
+            let cert_file = File::open(self.trusted_ca_file.as_str()).expect("Cannot open CA file");
+            let mut reader = BufReader::new(cert_file);
+            root_store.add_parsable_certificates(&rustls_pemfile::certs(&mut reader).unwrap());
         }
         else {
-            let server_name = self.server_name.clone();
-            cfg.set_servername_callback(move |ssl, _| {
-                ssl.set_hostname(server_name.as_str()).unwrap();
-                return Ok(());
-        });
-        }
-        if self.insecure_skip_verify{
-            cfg.set_verify(SslVerifyMode::NONE);
-        }
-        else {
-            cfg.set_verify(SslVerifyMode::PEER);
+            let cert_file = File::open(self.client_cert_file.as_str()).expect("Cannot open CA file");
+            let mut reader = BufReader::new(cert_file);
+            root_store.add_parsable_certificates(&rustls_pemfile::certs(&mut reader).unwrap());
         }
 
 
-        if self.empty_cn{
-            let mut has_no_empty_cn = false;
-            let mut cn = String::new();
-            // let cn = Arc::new(RefCell::new(String::new()));
-            let key_file =&self.clone().key_file;
-            let cert_file = &self.clone().cert_file;
-            let _ = new_cert(&self.cert_file.clone(), &self.key_file.clone(), Some(move |cert:&[u8], key:&[u8]| -> Result<SslAcceptor, ErrorStack> {
-                let x509_cert = X509::from_pem(cert).expect("cannot parse cert");
-                let entries = x509_cert.subject_name().entries_by_nid(Nid::COMMONNAME);
-                for entry in entries {
-                    if entry.data().is_empty() {
-                        has_no_empty_cn = true;
-                        cn = entry.data().as_utf8().unwrap().to_string();
-                        break;
-                    }
-                };
-                let mut tls_build = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
-                tls_build.set_private_key_file(key_file, SslFiletype::PEM).unwrap();
-                tls_build.set_certificate_chain_file(cert_file).unwrap();
-                Ok(tls_build.build())
-            }));
 
-            if has_no_empty_cn {
-                return Err(Error::new(ErrorKind::Other, format!("cert has non-empty CN , but --empty-cn is set cert_file => {}", self.clone().cert_file)));
-            }
-        }
-        cfg.set_max_proto_version(Option::from(SslVersion::TLS1_2)).unwrap();
-        return Ok(cfg);
+        // let suites = rustls::DEFAULT_CIPHER_SUITES.to_vec();
+        let versions = rustls::DEFAULT_VERSIONS.to_vec();
+
+        let certs = load_certs(self.client_cert_file.as_str());
+        let key = load_private_key(self.client_key_file.as_str());
+
+
+        let config = rustls::ClientConfig::builder()
+            .with_cipher_suites(&self.cipher_suites)
+            .with_safe_default_kx_groups()
+            .with_protocol_versions(&versions)
+            .expect("inconsistent cipher-suite/versions selected")
+            .with_root_certificates(root_store)
+            // .with_root_certificates(root_store)
+            .with_client_auth_cert(certs, key)
+            .expect("invalid client auth certs/key");
+        Arc::new(config)
     }
+
+    pub async fn new_tls_stream(&self,domain: &str, addr: SocketAddr) -> ClientTlsStream<TcpStream> {
+        let config = self.client_config();
+
+        let connector = TlsConnector::from(config);
+
+        let stream = TcpStream::connect(&addr).await.unwrap();
+        let domain = rustls::ServerName::try_from(domain)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid dnsname")).unwrap();
+        let stream = connector.connect(domain, stream).await.unwrap();
+        stream
+    }
+
+    pub fn new_tls_acceptor(&self) -> TlsAcceptor {
+        let config = self.server_config();
+        let acceptor = TlsAcceptor::from(config);
+        acceptor
+    }
+}
+
+pub fn load_certs(filename: &str) -> Vec<rustls::Certificate> {
+    let certfile = File::open(filename).expect("cannot open certificate file");
+    let mut reader = BufReader::new(certfile);
+
+    rustls_pemfile::certs(&mut reader)
+        .unwrap()
+        .iter()
+        .map(|v| rustls::Certificate(v.clone()))
+        .collect()
+}
+
+pub fn load_private_key(filename: &str) -> rustls::PrivateKey {
+    let keyfile = File::open(filename).expect("cannot open private key file");
+    let mut reader = BufReader::new(keyfile);
+    loop {
+        match rustls_pemfile::read_one(&mut reader).expect("cannot parse private key .pem file") {
+            Some(rustls_pemfile::Item::RSAKey(key)) => return rustls::PrivateKey(key),
+            Some(rustls_pemfile::Item::PKCS8Key(key)) => return rustls::PrivateKey(key),
+            Some(rustls_pemfile::Item::ECKey(key)) => return rustls::PrivateKey(key),
+            None => break,
+            _ => {}
+        }
+    }
+
+    panic!(
+        "no keys found in {:?} (encrypted keys not supported)",
+        filename
+    );
+}
+
+pub fn lookup_ipv4(host: &str, port: u16) -> SocketAddr {
+    let addrs = (host, port).to_socket_addrs().unwrap();
+    for addr in addrs {
+        if let SocketAddr::V4(_) = addr {
+            return addr;
+        }
+    }
+
+    unreachable!("Cannot lookup address");
+}
+
+pub fn self_cert(dirpath:&str, hosts:Vec<&str>, self_signed_cert_validity:usize, additional_usages:Option<&mut ExtendedKeyUsage>) -> Result<TLSInfo,Error>{
+    let mut info = TLSInfo::new();
+    info.logger = default_logger();
+    if self_signed_cert_validity == 0{
+        warn!(info.logger, "selfSignedCertValidity is invalid,it should be greater than 0,cannot generate cert");
+        return Err(Error::new(ErrorKind::Other, "cannot generate cert"));
+    };
+    torch_dir_all(dirpath).expect("torch dir error");
+    let mut cert_file = PathBuf::new().join(dirpath).join("cert.pem");
+    let mut abs_cert_file = cert_file.clone();
+    let mut key_file = PathBuf::new().join(dirpath).join("key.pem");
+    let mut abs_key_file = key_file.clone();
+    // abs_key_file.push("key.pem");
+
+    if abs_key_file.exists() && abs_cert_file.exists(){
+        info.cert_file = abs_cert_file.clone().to_str().unwrap().to_string();
+        info.key_file = abs_key_file.clone().to_str().unwrap().to_string();
+        info.client_cert_file = abs_cert_file.clone().to_str().unwrap().to_string();
+        info.client_key_file = abs_key_file.clone().to_str().unwrap().to_string();
+        info.self_cert = true;
+        return Ok(info.clone());
+    }
+
+
+    let mut rng = thread_rng();
+    let serial_number_limit: BigUint = BigUint::from(1_u128).shl(128);
+    let serial_number: BigUint = BigUint::from_bytes_le(&rng.gen::<[u8; 16]>()) % &serial_number_limit;
+    if serial_number == BigUint::from(0_u128){
+        warn!(info.logger, "serial number is 0, cannot generate cert");
+        return Err(Error::new(ErrorKind::Other, "cannot generate cert"));
+    }
+
+
+    let mut name = X509NameBuilder::new().unwrap();
+    name.append_entry_by_nid(Nid::ORGANIZATIONNAME,"etcd").unwrap();
+    let key_usage = KeyUsage::new().key_encipherment().digital_signature().build().unwrap();
+    let ext_key_usage = ExtendedKeyUsage::new().server_auth().build().unwrap();
+    let num = BigNum::from_slice(serial_number.to_bytes_le().as_slice()).unwrap();
+    let mut build = X509Builder::new().unwrap();
+
+    build.set_serial_number(Asn1Integer::from_bn(&num).unwrap().as_ref()).unwrap();
+    build.set_subject_name(name.build().as_ref()).unwrap();
+    build.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
+    let after =&Asn1Time::days_from_now(self_signed_cert_validity as u32).unwrap();
+    build.set_not_after(&after.clone()).unwrap();
+    build.append_extension(key_usage).unwrap();
+    if additional_usages.is_some(){
+        build.append_extension(additional_usages.unwrap().server_auth().build().unwrap()).unwrap()
+    }
+    else {
+        build.append_extension(ext_key_usage).unwrap();
+    };
+    info!(default_logger(),"automatically generate certificates,certificate-validity-bound-not-after =>{}",after.clone().to_string());
+
+    let mut ext_builder = SubjectAlternativeName::new();
+    for host in hosts.clone() {
+        if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+            ext_builder.ip(&ip.to_string());
+        } else {
+            ext_builder.dns(host);
+        }
+    }
+    let ext = ext_builder.build(&build.x509v3_context(None, None)).unwrap();
+    build.append_extension(ext).unwrap();
+
+    let group = EcGroup::from_curve_name(Nid::SECP521R1).unwrap();
+    let ecdsa = EcKey::generate(&group);
+    if ecdsa.clone().is_err(){
+        warn!(default_logger(),"cannot generate ecdsa key, reason =>{}",ecdsa.clone().err().unwrap());
+        return Err(Error::new(ErrorKind::Other, "cannot generate ecdsa key"));
+    }
+    let priv_key = PKey::from_ec_key(ecdsa.clone().unwrap()).unwrap();
+
+    build.set_pubkey(PKey::public_key_from_pem(priv_key.clone().public_key_to_pem().unwrap().as_slice()).unwrap().as_ref()).unwrap();
+    build.sign(priv_key.clone().as_ref(), MessageDigest::sha256()).unwrap();
+
+    let mut cert = build.build();
+    let pem = cert.to_pem();
+    if pem.is_err(){
+        warn!(default_logger(),"cannot generate pem, reason =>{}",pem.clone().err().unwrap());
+        return Err(Error::new(ErrorKind::Other, "cannot generate pem"));
+    }
+    let cert_out = File::create(cert_file.clone()).unwrap()
+        .write_all(cert.to_pem().unwrap().as_slice());
+
+
+    if cert_out.is_err() {
+        warn!(default_logger(),"cannot write cert file, reason =>{}",cert_out.err().unwrap().to_string().clone());
+        return Err(Error::new(ErrorKind::Other, "cannot write cert file"));
+    }
+
+    let key_out = File::create(key_file.clone()).unwrap()
+        .write_all(priv_key.private_key_to_pem_pkcs8().unwrap().as_slice());
+    if key_out.is_err() {
+        warn!(default_logger(),"cannot write key file, reason =>{}",key_out.err().unwrap().to_string().clone());
+        return Err(Error::new(ErrorKind::Other, "cannot write key file"));
+    }
+    set_permissions(key_file.clone(),Permissions::from_mode(0o600)).unwrap();
+    return self_cert(dirpath.clone(), hosts.clone(), self_signed_cert_validity.clone(), None);
+}
+
+pub fn new_tls_acceptor(tlsinfo:TLSInfo) -> TlsAcceptor {
+    let config = tlsinfo.server_config();
+    let acceptor = TlsAcceptor::from(config);
+    acceptor
 }
 
 #[cfg(test)]
@@ -500,7 +401,7 @@ mod tests{
         let self_signed_cert_validity = 365;
         let mut binding = ExtendedKeyUsage::new();
         let additional_usages = binding.client_auth();
-        let tls_info = tls_info.self_cert(dirpath, hosts, self_signed_cert_validity, Some(additional_usages));
+        let tls_info = self_cert(dirpath, hosts, self_signed_cert_validity, Some(additional_usages));
         println!("{:?}", tls_info.unwrap().string());
     }
 

@@ -104,12 +104,13 @@ fn make_server_config(certs: &str, key_file: &str) -> Arc<rustls::ServerConfig> 
         .with_single_cert_with_ocsp_and_sct(certs, privkey, vec![], vec![])
         .expect("bad certificates/private key");
 
+
     config.key_log = Arc::new(rustls::KeyLogFile::new());
     config.session_storage = rustls::server::ServerSessionMemoryCache::new(256);
     Arc::new(config)
 }
 
-pub async fn new_tls_stream(domain: &str, addr: std::net::SocketAddr,
+pub async fn new_tls_stream(domain: &str, addr: SocketAddr,
                             ca_file: &str, cert_file: &str, key_file: &str) -> ClientTlsStream<TcpStream> {
     let config = make_client_config(&ca_file, &cert_file, &key_file);
 
@@ -142,12 +143,13 @@ mod tests {
 
     #[tokio::test]
     async fn tls() {
-        let msg = b"Hello world\n";
-        let mut buf = [0; 12];
+        let msg = b"https://127.0.0.1:5002";
+        let mut buf = [0; 22];
 
         start_server().await;
 
         start_client(msg, &mut buf).await;
+
         assert_eq!(&buf, msg);
     }
 
@@ -161,7 +163,7 @@ mod tests {
             let mut tls_stream = tls_acceptor.accept(stream).await.unwrap();
             println!("server: Accepted client conn with TLS");
 
-            let mut buf = [0; 12];
+            let mut buf = [0; 22];
             tls_stream.read(&mut buf).await.unwrap();
             println!("server: got data: {:?}", buf);
             tls_stream.write(&buf).await.unwrap();
