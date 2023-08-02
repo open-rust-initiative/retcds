@@ -26,6 +26,7 @@ use crate::pkg::tlsutil::tlsutil::{new_cert};
 use std::os::fd::AsRawFd;
 use std::convert::TryFrom;
 use std::io::BufReader;
+use openssl::rsa::Rsa;
 use openssl_sys::RSA;
 use rustls::{RootCertStore, server::{AllowAnyAuthenticatedClient}, SupportedCipherSuite};
 use rustls::internal::msgs::codec::Codec;
@@ -152,6 +153,7 @@ impl TLSInfo{
 
         client_auth_roots.add_parsable_certificates(&rustls_pemfile::certs(&mut reader).unwrap());
         let client_auth = AllowAnyAuthenticatedClient::new(client_auth_roots);
+        warn!(default_logger(),"{}",self.key_file.as_str());
         let privkey = load_private_key(self.key_file.as_str());
         // let suites = rustls::ALL_CIPHER_SUITES.to_vec();
         let versions = rustls::ALL_VERSIONS.to_vec();
@@ -243,9 +245,15 @@ pub fn load_private_key(filename: &str) -> rustls::PrivateKey {
     let mut reader = BufReader::new(keyfile);
     loop {
         match rustls_pemfile::read_one(&mut reader).expect("cannot parse private key .pem file") {
-            Some(rustls_pemfile::Item::RSAKey(key)) => return rustls::PrivateKey(key),
-            Some(rustls_pemfile::Item::PKCS8Key(key)) => return rustls::PrivateKey(key),
-            Some(rustls_pemfile::Item::ECKey(key)) => return rustls::PrivateKey(key),
+            Some(rustls_pemfile::Item::RSAKey(key)) => {
+                warn!(default_logger(),"is RSAkey");
+                return rustls::PrivateKey(key)},
+            Some(rustls_pemfile::Item::PKCS8Key(key)) => {
+                warn!(default_logger(),"is pkcs8key");
+                return rustls::PrivateKey(key)},
+            Some(rustls_pemfile::Item::ECKey(key)) => {
+                warn!(default_logger(),"is ECkey");
+                return rustls::PrivateKey(key)},
             None => break,
             _ => {}
         }
@@ -332,14 +340,19 @@ pub fn self_cert(dirpath:&str, hosts:Vec<&str>, self_signed_cert_validity:usize,
     }
     let ext = ext_builder.build(&build.x509v3_context(None, None)).unwrap();
     build.append_extension(ext).unwrap();
+    build.set_version(2).unwrap();
+    let mut issuer = X509NameBuilder::new().unwrap();
+    issuer.append_entry_by_nid(Nid::ORGANIZATIONNAME,"etcd").unwrap();
+    build.set_issuer_name(issuer.build().as_ref()).unwrap();
 
-    let group = EcGroup::from_curve_name(Nid::SECP521R1).unwrap();
-    let ecdsa = EcKey::generate(&group);
-    if ecdsa.clone().is_err(){
-        warn!(default_logger(),"cannot generate ecdsa key, reason =>{}",ecdsa.clone().err().unwrap());
+    // let group = EcGroup::from_curve_name(Nid::SECP521R1).unwrap();
+    // let ecdsa = EcKey::generate(&group);
+    let rsa = Rsa::generate(2048);
+    if rsa.clone().is_err(){
+        warn!(default_logger(),"cannot generate rsa key, reason =>{}",rsa.clone().err().unwrap());
         return Err(Error::new(ErrorKind::Other, "cannot generate ecdsa key"));
     }
-    let priv_key = PKey::from_ec_key(ecdsa.clone().unwrap()).unwrap();
+    let priv_key = PKey::from_rsa(rsa.clone().unwrap()).unwrap();
 
     build.set_pubkey(PKey::public_key_from_pem(priv_key.clone().public_key_to_pem().unwrap().as_slice()).unwrap().as_ref()).unwrap();
     build.sign(priv_key.clone().as_ref(), MessageDigest::sha256()).unwrap();
@@ -360,7 +373,7 @@ pub fn self_cert(dirpath:&str, hosts:Vec<&str>, self_signed_cert_validity:usize,
     }
 
     let key_out = File::create(key_file.clone()).unwrap()
-        .write_all(priv_key.private_key_to_pem_pkcs8().unwrap().as_slice());
+        .write_all(rsa.unwrap().private_key_to_pem().unwrap().as_slice());
     if key_out.is_err() {
         warn!(default_logger(),"cannot write key file, reason =>{}",key_out.err().unwrap().to_string().clone());
         return Err(Error::new(ErrorKind::Other, "cannot write key file"));
@@ -405,8 +418,4 @@ mod tests{
         println!("{:?}", tls_info.unwrap().string());
     }
 
-    #[test]
-    fn test_self_cert_res(){
-
-    }
 }

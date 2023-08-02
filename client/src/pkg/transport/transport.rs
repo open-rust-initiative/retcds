@@ -26,11 +26,17 @@ pub fn transport(tlsinfo:TLSInfo) -> Client<HttpsConnector<HttpConnector>, hyper
 
 #[cfg(test)]
 mod tests {
+    use hyper::{Body, Response, Server};
+    use hyper::server::conn::AddrIncoming;
+    use hyper::service::{make_service_fn, service_fn};
+    use hyper_rustls::TlsAcceptor;
     use openssl::x509::extension::ExtendedKeyUsage;
+    use tokio::fs::File;
+    use tokio::io;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use super::*;
-    use crate::pkg::transport::listener::{new_tls_acceptor, TLSInfo};
+    use crate::pkg::transport::listener::{load_certs, load_private_key, new_tls_acceptor, TLSInfo};
     use crate::pkg::transport::listener::self_cert;
 
     #[tokio::test]
@@ -41,7 +47,7 @@ mod tests {
         let mut binding = ExtendedKeyUsage::new();
         let additional_usages = binding.client_auth();
         let info = self_cert(dirpath, hosts, self_signed_cert_validity, Some(additional_usages)).unwrap();
-        start_server(info.clone()).await;
+        server(info.clone());
         let client = transport(info);
         let response = client.get("https://127.0.0.1:5002".parse().unwrap()).await.unwrap();
         println!("Response: {}", response.status());
@@ -63,5 +69,29 @@ mod tests {
             tls_stream.write(&buf).await.unwrap();
             println!("server: flush the data out");
         });
+    }
+
+    // #[tokio::test]
+    async fn server(tlsinfo:TLSInfo){
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        let addr = "127.0.0.1:5002".parse().unwrap();
+
+        let cert = load_certs(tlsinfo.get_cert_file().as_str());
+        let key = load_private_key(tlsinfo.get_key_file().as_str());
+
+        let incoming = AddrIncoming::bind(&addr).unwrap();
+        let tls_acceptor = new_tls_acceptor(tlsinfo);
+
+        let acceptor = TlsAcceptor::builder()
+            .with_single_cert(cert,key)
+            .unwrap()
+            .with_all_versions_alpn()
+            .with_incoming(incoming);
+        let service = make_service_fn(|_| async { Ok::<_, io::Error>(service_fn(|_req|async {Ok::<_, io::Error>(Response::new(Body::empty()))})) });
+        let server = Server::builder(acceptor)
+            .http2_only(true)
+            .serve(service);
+
+        server.await.unwrap();
     }
 }
