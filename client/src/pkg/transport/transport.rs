@@ -31,6 +31,7 @@ mod tests {
     use hyper::service::{make_service_fn, service_fn};
     use hyper_rustls::TlsAcceptor;
     use openssl::x509::extension::ExtendedKeyUsage;
+    use slog::warn;
     use tokio::fs::File;
     use tokio::io;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -38,6 +39,7 @@ mod tests {
     use super::*;
     use crate::pkg::transport::listener::{load_certs, load_private_key, new_tls_acceptor, TLSInfo};
     use crate::pkg::transport::listener::self_cert;
+    use crate::pkg::tlsutil::default_logger;
 
     #[tokio::test]
     async fn test_transport() {
@@ -47,10 +49,12 @@ mod tests {
         let mut binding = ExtendedKeyUsage::new();
         let additional_usages = binding.client_auth();
         let info = self_cert(dirpath, hosts, self_signed_cert_validity, Some(additional_usages)).unwrap();
-        server(info.clone());
+        server(info.clone()).await;
+        warn!(default_logger(),"client started");
         let client = transport(info);
         let response = client.get("https://127.0.0.1:5002".parse().unwrap()).await.unwrap();
-        println!("Response: {}", response.status());
+        warn!(default_logger(),"Response: {}", response.status());
+        // println!("Response: {}", response.status());
     }
 
     async fn start_server(tlsinfo:TLSInfo) {
@@ -73,25 +77,28 @@ mod tests {
 
     // #[tokio::test]
     async fn server(tlsinfo:TLSInfo){
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
+        // let mut rt = tokio::runtime::Runtime::new().unwrap();
         let addr = "127.0.0.1:5002".parse().unwrap();
 
         let cert = load_certs(tlsinfo.get_cert_file().as_str());
         let key = load_private_key(tlsinfo.get_key_file().as_str());
 
         let incoming = AddrIncoming::bind(&addr).unwrap();
-        let tls_acceptor = new_tls_acceptor(tlsinfo);
+        let tls_acceptor = new_tls_acceptor(tlsinfo.clone());
 
         let acceptor = TlsAcceptor::builder()
-            .with_single_cert(cert,key)
-            .unwrap()
+            .with_tls_config((*tlsinfo.clone().server_config()).clone())
             .with_all_versions_alpn()
             .with_incoming(incoming);
         let service = make_service_fn(|_| async { Ok::<_, io::Error>(service_fn(|_req|async {Ok::<_, io::Error>(Response::new(Body::empty()))})) });
-        let server = Server::builder(acceptor)
-            .http2_only(true)
-            .serve(service);
 
-        server.await.unwrap();
+        tokio::spawn(async move {
+            let server = Server::builder(acceptor)
+                .http2_only(true)
+                .serve(service);
+            server.await.unwrap();
+        });
     }
+
+
 }

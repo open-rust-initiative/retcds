@@ -9,7 +9,6 @@ use std::sync::Arc;
 use num_bigint::{BigUint, ToBigUint};
 use openssl::asn1::{Asn1Integer, Asn1Time};
 use openssl::bn::BigNum;
-use openssl::ec::{EcGroup, EcKey};
 use openssl::error::ErrorStack;
 use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
@@ -22,16 +21,12 @@ use rand::distributions::uniform::SampleBorrow;
 use slog::{info, Logger, warn};
 use crate::pkg::fileutil::fileutil::torch_dir_all;
 use crate::pkg::tlsutil::default_logger;
-use crate::pkg::tlsutil::tlsutil::{new_cert};
 use std::os::fd::AsRawFd;
 use std::convert::TryFrom;
 use std::io::BufReader;
 use openssl::rsa::Rsa;
-use openssl_sys::RSA;
 use rustls::{RootCertStore, server::{AllowAnyAuthenticatedClient}, SupportedCipherSuite};
 use rustls::internal::msgs::codec::Codec;
-use rustls_pemfile::Item::RSAKey;
-use rustls_pemfile::read_one;
 use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{
@@ -71,10 +66,6 @@ pub struct TLSInfo {
 
     self_cert: bool,
 
-    // parseFunc exists to simplify testing. Typically, parseFunc
-    // should be left nil. In that case, tls.X509KeyPair will be used.
-    parse_func: Option<fn(&[u8], &[u8]) -> Result<SslAcceptor, ErrorStack>>,
-
     // AllowedCN is a CN which must be provided by a client.
     allowed_cn: String,
 
@@ -107,7 +98,6 @@ impl TLSInfo{
             handshake_failure: None,
             cipher_suites: rustls::ALL_CIPHER_SUITES.to_vec(),
             self_cert: false,
-            parse_func: None,
             allowed_cn: String::from(""),
             allowed_hostname: String::from(""),
             logger: default_logger(),
@@ -141,7 +131,7 @@ impl TLSInfo{
     // ServerConfig generates a config use by an HTTP server.
     pub fn server_config(&self) -> Arc<rustls::ServerConfig> {
         let roots = load_certs(self.cert_file.as_str());
-        warn!(default_logger(),"{}",self.cert_file.as_str());
+        // warn!(default_logger(),"{}",self.cert_file.as_str());
         let certs = roots.clone();
 
         let certfile = File::open(self.cert_file.as_str()).expect("cannot open certificate file");
@@ -153,7 +143,7 @@ impl TLSInfo{
 
         client_auth_roots.add_parsable_certificates(&rustls_pemfile::certs(&mut reader).unwrap());
         let client_auth = AllowAnyAuthenticatedClient::new(client_auth_roots);
-        warn!(default_logger(),"{}",self.key_file.as_str());
+        // warn!(default_logger(),"{}",self.key_file.as_str());
         let privkey = load_private_key(self.key_file.as_str());
         // let suites = rustls::ALL_CIPHER_SUITES.to_vec();
         let versions = rustls::ALL_VERSIONS.to_vec();
@@ -246,13 +236,13 @@ pub fn load_private_key(filename: &str) -> rustls::PrivateKey {
     loop {
         match rustls_pemfile::read_one(&mut reader).expect("cannot parse private key .pem file") {
             Some(rustls_pemfile::Item::RSAKey(key)) => {
-                warn!(default_logger(),"is RSAkey");
+                // warn!(default_logger(),"is RSAkey");
                 return rustls::PrivateKey(key)},
             Some(rustls_pemfile::Item::PKCS8Key(key)) => {
-                warn!(default_logger(),"is pkcs8key");
+                // warn!(default_logger(),"is pkcs8key");
                 return rustls::PrivateKey(key)},
             Some(rustls_pemfile::Item::ECKey(key)) => {
-                warn!(default_logger(),"is ECkey");
+                // warn!(default_logger(),"is ECkey");
                 return rustls::PrivateKey(key)},
             None => break,
             _ => {}
