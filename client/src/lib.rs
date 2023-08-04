@@ -1,1 +1,1 @@
-mod pkg;
+pub mod pkg;

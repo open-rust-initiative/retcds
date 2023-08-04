@@ -5,7 +5,7 @@ use actix_web::{HttpServer};
 use raft::eraftpb::Message;
 use anyhow::Result;
 use raft::SnapshotStatus;
-
+use client::pkg::transport::listener::TLSInfo;
 use crate::etcdserver::api::rafthttp::snap::message::SnapMessage;
 use crate::etcdserver::api::rafthttp::snap::snap_shotter::SnapShotter;
 use crate::etcdserver::api::rafthttp::types::id::ID;
@@ -37,6 +37,8 @@ pub trait Transporter{
 
 pub struct Transport{
     logger : slog::Logger,
+
+    tlsinfo: TLSInfo,
 
     dial_timeout : std::time::Duration,
     dial_retry_frequency : f64,
