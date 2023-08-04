@@ -70,6 +70,36 @@ mod tests{
 
         assert_eq!(u,uu);
     }
+
+    #[test]
+    fn test_url_picker_update(){
+        let urls = vec!["http://127.0.0.1:2380".to_string(), "http://127.0.0.1:7001".to_string()];
+
+        let URLs = new_urls(urls).unwrap();
+        let mut url_picker = urlPicker::new_url_picker(URLs);
+        let new_url = vec!["http://localhost:2380".to_string(), "http://localhost:7001".to_string()];
+
+        let new_url = new_urls(new_url).unwrap();
+        url_picker.base_url_picker.lock().unwrap().update(new_url);
+        let u = url_picker.base_url_picker.lock().unwrap().pick();
+        let mut url_map = HashMap::new();
+        url_map.insert(Url::parse("http://localhost:7001").unwrap(),true);
+        url_map.insert(Url::parse("http://localhost:2380").unwrap(),true);
+        assert!(url_map.get(&u.clone().unwrap()).unwrap());
+    }
+
+    #[test]
+    fn test_url_picker_unreachable(){
+        let urls = vec!["http://127.0.0.1:2380".to_string(), "http://127.0.0.1:7001".to_string()];
+
+        let URLs = new_urls(urls).unwrap();
+        let mut url_picker = urlPicker::new_url_picker(URLs);
+        let u = url_picker.base_url_picker.lock().unwrap().pick();
+        url_picker.base_url_picker.lock().unwrap().unreachable(u.clone().unwrap());
+        let uu = url_picker.base_url_picker.lock().unwrap().pick();
+        // assert_eq!(u.clone(),uu.clone())
+        assert!((u.unwrap() != uu.unwrap()));
+    }
 }
 
 

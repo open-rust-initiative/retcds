@@ -9,6 +9,7 @@ pub mod v2state;
 mod peer_status;
 mod remote;
 mod url_pick;
+mod pipeline;
 
 #[allow(dead_code)]
 pub fn default_logger() -> slog::Logger {

@@ -4,12 +4,12 @@ use slog::{debug, info, warn};
 use tokio::sync::Mutex;
 use crate::etcdserver::api::rafthttp::types;
 use crate::etcdserver::api::rafthttp::default_logger;
-struct FailureType {
+pub struct FailureType {
     source: String,
     action: String,
 }
 
-struct PeerStatus{
+pub struct PeerStatus{
     base_peer_status : Arc<Mutex<BasePeerStatus>>
 }
 
@@ -21,7 +21,7 @@ impl PeerStatus{
     }
 }
 
-struct BasePeerStatus {
+pub struct BasePeerStatus {
     lg: slog::Logger,
     local: types::id::ID,
     id: types::id::ID,

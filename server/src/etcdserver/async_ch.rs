@@ -1,11 +1,5 @@
-use std::sync::Arc;
-// use std::sync::mpsc::{Receiver, Sender, SendError, TryRecvError};
-use std::time::Duration;
 use futures::SinkExt;
 use async_channel::{bounded, Sender, Receiver, SendError, RecvError, TryRecvError};
-use env_logger::Env;
-use futures::task::SpawnExt;
-use raft::eraftpb::Message;
 
 #[derive(Clone)]
 pub(crate) struct Channel<T> {

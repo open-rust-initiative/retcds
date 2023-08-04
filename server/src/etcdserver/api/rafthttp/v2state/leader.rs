@@ -82,7 +82,7 @@ struct BaseLeaderStats{
 }
 
 #[derive(Serialize,Deserialize)]
-struct FollowerStats{
+pub struct FollowerStats{
     base_follower_stats : Mutex<BaseFollowerStats>,
 }
 
