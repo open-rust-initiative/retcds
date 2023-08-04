@@ -12,7 +12,7 @@ impl fmt::LowerHex for ID {
 
 impl ID {
     pub fn to_string(&self) -> String {
-        format!("{:x}", i)
+        self.0.to_string()
     }
 }
 

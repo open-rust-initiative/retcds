@@ -6,7 +6,9 @@ mod util;
 pub mod error;
 pub mod types;
 pub mod v2state;
+mod peer_status;
 mod remote;
+mod url_pick;
 
 #[allow(dead_code)]
 pub fn default_logger() -> slog::Logger {
