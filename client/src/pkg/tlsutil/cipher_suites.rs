@@ -3,8 +3,6 @@ use slog::info;
 use crate::pkg::tlsutil::default_logger;
 
 fn get_cipher_suite(s: &str) -> Option<u16> {
-
-
     for suite in ALL_CIPHER_SUITES.iter() {
         // info!(default_logger(),"{}",suite.suite().as_str().unwrap());
         if s == suite.suite().as_str().unwrap() {

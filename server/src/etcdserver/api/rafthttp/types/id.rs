@@ -10,9 +10,14 @@ impl fmt::LowerHex for ID {
     }
 }
 
+impl ID {
+    pub fn to_string(&self) -> String {
+        format!("{:x}", i)
+    }
+}
+
 impl FromStr for ID {
     type Err = std::num::ParseIntError;
-
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let i = u64::from_str_radix(s, 16)?;
         Ok(ID(i))
