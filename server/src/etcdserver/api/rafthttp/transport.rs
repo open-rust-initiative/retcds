@@ -1,7 +1,6 @@
 use std::env::Args;
 use actix::Handler;
 use actix_ratelimit::ActorMessage;
-use actix_web::{HttpServer};
 use raft::eraftpb::Message;
 use anyhow::Result;
 use raft::SnapshotStatus;

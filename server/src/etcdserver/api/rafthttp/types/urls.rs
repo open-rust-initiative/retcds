@@ -45,6 +45,10 @@ impl URLs{
     pub fn get_url(&self,index:usize) -> Option<Url>{
         return self.0.get(index).cloned();
     }
+
+    pub fn get_urls(&self) -> Vec<Url>{
+        return self.0.clone();
+    }
 }
 
 pub fn new_urls(strs:Vec<String>) -> Result<URLs, Error> {

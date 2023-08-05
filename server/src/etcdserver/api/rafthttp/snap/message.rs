@@ -1,7 +1,5 @@
 use std::io::Read;
 use std::rc;
-use actix_web::dev::ServerHandle;
-// use actix_web::dev::Server;
 use futures::SinkExt;
 use raft::eraftpb::Message;
 use crate::etcdserver::api::rafthttp::error::Error;
