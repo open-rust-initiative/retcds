@@ -3,6 +3,10 @@ use actix::Handler;
 use actix_ratelimit::ActorMessage;
 use raft::eraftpb::Message;
 use anyhow::Result;
+use hyper::{Body, Client};
+use hyper::client::HttpConnector;
+use hyper_rustls::HttpsConnector;
+use url::Url;
 use raft::SnapshotStatus;
 use client::pkg::transport::listener::TLSInfo;
 use crate::etcdserver::api::rafthttp::snap::message::SnapMessage;
@@ -51,6 +55,29 @@ pub struct Transport{
 
     leader_stats : LeaderStats,
 
+    stream_client : Client<HttpsConnector<HttpConnector>, hyper::Body>,
 
+    pipeline_client: Client<HttpsConnector<HttpConnector>, hyper::Body>
+}
 
+impl Transport{
+    pub fn get_id(&self) -> ID{
+        self.ID
+    }
+
+    pub fn get_urls(&self) -> URLs{
+       self.URLS.clone()
+    }
+
+    pub fn get_cluster_id(&self) -> ID{
+        self.cluster_id
+    }
+
+    pub fn get_pipeline_client(&self) -> Client<HttpsConnector<HttpConnector>, hyper::Body>{
+        self.pipeline_client.clone()
+    }
+
+    pub fn get_stream_client(&self) -> Client<HttpsConnector<HttpConnector>, hyper::Body>{
+        self.stream_client.clone()
+    }
 }

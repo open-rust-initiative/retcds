@@ -3,7 +3,7 @@ use slog::o;
 pub mod reader;
 pub mod read_closer;
 pub mod util;
-mod net_util;
+pub mod net_util;
 pub mod version;
 use slog::Drain;
 

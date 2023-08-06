@@ -13,6 +13,10 @@ impl urlPicker{
             base_url_picker : Arc::new(Mutex::new(BaseurlPicker::new(urls)))
         }
     }
+
+    pub fn get_base_url_picker(&self) -> Arc<Mutex<BaseurlPicker>>{
+        self.base_url_picker.clone()
+    }
 }
 
 pub struct BaseurlPicker{
