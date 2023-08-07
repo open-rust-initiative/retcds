@@ -1,10 +1,18 @@
 use futures::SinkExt;
 use async_channel::{bounded, Sender, Receiver, SendError, RecvError, TryRecvError};
 
-#[derive(Clone)]
 pub(crate) struct Channel<T> {
     rx: Option<Receiver<T>>,
     tx: Option<Sender<T>>,
+}
+
+impl<T> Clone for Channel<T> {
+    fn clone(&self) -> Self {
+        Self {
+            rx: self.rx.clone(),
+            tx: self.tx.clone(),
+        }
+    }
 }
 
 impl<T> Channel<T> {

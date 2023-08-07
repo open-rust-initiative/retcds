@@ -85,12 +85,14 @@ impl Clone for FollowerStats {
             base_follower_stats: Mutex::new(self.base_follower_stats.lock().unwrap().clone())
         }
     }
+
 }
 
 // Succ updates the FollowerStats with a successful send
 impl FollowerStats{
 
-    fn default() -> Self{
+
+    pub fn default() -> Self{
         FollowerStats{
             base_follower_stats: Mutex::new(BaseFollowerStats{
                 counts: CountsStats{
@@ -109,7 +111,7 @@ impl FollowerStats{
         }
     }
 
-    fn succ(&self,d : Duration){
+    pub fn succ(&self,d : Duration){
         let mut _lock = match self.base_follower_stats.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -134,7 +136,7 @@ impl FollowerStats{
         std::mem::drop(_lock);
     }
 
-    fn fail(&self){
+    pub fn fail(&self){
         let mut _lock = match self.base_follower_stats.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),

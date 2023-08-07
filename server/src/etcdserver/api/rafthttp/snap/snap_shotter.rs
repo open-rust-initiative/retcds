@@ -29,6 +29,7 @@ lazy_static! {
 
 
 
+#[derive(Clone)]
 pub struct SnapShotter{
     dir: String,
     logger: slog::Logger

@@ -1,8 +1,10 @@
 use std::env::Args;
+use std::io::Error;
 use actix::Handler;
 use actix_ratelimit::ActorMessage;
 use raft::eraftpb::Message;
 use anyhow::Result;
+use async_trait::async_trait;
 use hyper::{Body, Client};
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
@@ -15,9 +17,11 @@ use crate::etcdserver::api::rafthttp::types::id::ID;
 use crate::etcdserver::api::rafthttp::types::urls::URLs;
 use crate::etcdserver::api::rafthttp::v2state::leader::LeaderStats;
 use crate::etcdserver::api::rafthttp::v2state::server::ServerState;
+use crate::etcdserver::api::rafthttp::default_logger;
 
+#[async_trait]
 pub trait Raft{
-    fn process(&self, m: Message) -> Result<()>;
+    async fn process(&self, m: Message) -> Result<(),Error>;
     fn is_id_removed(&self, id: u64) -> bool;
     fn report_unreachable(&self, id: u64);
     fn report_snapshot(&self, id: u64, status: SnapshotStatus);
@@ -38,10 +42,10 @@ pub trait Transporter{
     fn stop(&self) -> Result<()>;
 }
 
+#[derive(Clone)]
 pub struct Transport{
-    logger : slog::Logger,
 
-    tlsinfo: TLSInfo,
+    tlsinfo: Option<TLSInfo>,
 
     dial_timeout : std::time::Duration,
     dial_retry_frequency : f64,
@@ -49,18 +53,55 @@ pub struct Transport{
     ID : ID,
     URLS : URLs,
     cluster_id : ID,
-    snap_shotter : SnapShotter,
+    snap_shotter : Option<SnapShotter>,
 
-    server_stats : ServerState,
+    server_stats : Option<ServerState>,
 
-    leader_stats : LeaderStats,
+    leader_stats : Option<LeaderStats>,
 
-    stream_client : Client<HttpsConnector<HttpConnector>, hyper::Body>,
+    stream_client : Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>,
 
-    pipeline_client: Client<HttpsConnector<HttpConnector>, hyper::Body>
+    pipeline_client: Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>
 }
 
 impl Transport{
+    pub fn new(urls: Vec<String>,
+               tlsinfo: Option<TLSInfo>,
+               dial_timeout: std::time::Duration,
+               dial_retry_frequency: f64,
+               id: u64,
+               cluster_id: u64,
+               snap_shotter: Option<SnapShotter>,
+               server_stats: Option<ServerState>,
+               leader_stats: Option<LeaderStats>,
+               sc:Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>,
+               pc:Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>) -> Transport{
+        let mut url_vec = Vec::new();
+        for url in urls{
+            url_vec.push(Url::parse(url.as_str()).unwrap());
+        }
+        Transport{
+            // logger : default_logger(),
+
+            tlsinfo,
+
+            dial_timeout,
+            dial_retry_frequency,
+
+            ID : ID::new(id),
+            URLS : URLs::new(url_vec),
+            cluster_id : ID::new(cluster_id),
+            snap_shotter,
+
+            server_stats,
+
+            leader_stats,
+
+            stream_client : sc,
+            pipeline_client: pc,
+        }
+    }
+
     pub fn get_id(&self) -> ID{
         self.ID
     }
@@ -73,11 +114,11 @@ impl Transport{
         self.cluster_id
     }
 
-    pub fn get_pipeline_client(&self) -> Client<HttpsConnector<HttpConnector>, hyper::Body>{
+    pub fn get_pipeline_client(&self) -> Option<Client<HttpsConnector<HttpConnector>>> {
         self.pipeline_client.clone()
     }
 
-    pub fn get_stream_client(&self) -> Client<HttpsConnector<HttpConnector>, hyper::Body>{
+    pub fn get_stream_client(&self) -> Option<Client<HttpsConnector<HttpConnector>>> {
         self.stream_client.clone()
     }
 }

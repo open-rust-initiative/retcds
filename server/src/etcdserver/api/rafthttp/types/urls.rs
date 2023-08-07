@@ -10,6 +10,10 @@ pub struct URLs(Vec<Url>);
 
 impl URLs{
 
+    pub fn new(value:Vec<Url>) -> URLs{
+        URLs(value)
+    }
+
     pub fn String(&self) -> String{
         let mut result = String::new();
         for i in 0..self.0.len(){

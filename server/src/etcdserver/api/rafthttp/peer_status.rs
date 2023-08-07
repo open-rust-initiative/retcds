@@ -9,6 +9,16 @@ pub struct FailureType {
     action: String,
 }
 
+impl FailureType {
+    pub fn new_failure_type(source: String, action: String) -> FailureType {
+        FailureType {
+            source,
+            action,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct PeerStatus{
     base_peer_status : Arc<Mutex<BasePeerStatus>>
 }
@@ -18,6 +28,9 @@ impl PeerStatus{
         PeerStatus{
             base_peer_status: Arc::new(Mutex::new(BasePeerStatus::new(local,id)))
         }
+    }
+    pub fn get_base_peer_status(&self) -> Arc<Mutex<BasePeerStatus>>{
+        self.base_peer_status.clone()
     }
 }
 

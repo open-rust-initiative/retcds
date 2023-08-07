@@ -11,6 +11,10 @@ impl fmt::LowerHex for ID {
 }
 
 impl ID {
+    pub fn new(id: u64) -> ID {
+        ID(id)
+    }
+
     pub fn to_string(&self) -> String {
         self.0.to_string()
     }
