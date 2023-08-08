@@ -48,3 +48,5 @@ semver = "1.0"
 surge-ping = "0.8"
 hyper-rustls = {version = "0.24" , features = ["http2","default"]}
 async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = "0.2"

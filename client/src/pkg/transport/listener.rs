@@ -36,7 +36,7 @@ use tokio_rustls::{
     client::TlsStream as ClientTlsStream,
 };
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub struct TLSInfo {
     // CertFile is the _server_ cert, it will also be used as a _client_ certificate if ClientCertFile is empty
     cert_file: String,

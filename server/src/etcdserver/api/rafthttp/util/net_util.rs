@@ -1,13 +1,14 @@
 use std::cmp::Ordering;
 use std::error::Error;
 use std::fmt;
+use std::fmt::Debug;
 use std::io::ErrorKind;
 use hyper::{Body, Method, Request, Response, StatusCode};
 use hyper::body::HttpBody;
 use hyper::http::HeaderValue;
 use hyper::http::request::Builder;
 use semver::{BuildMetadata, Prerelease, Version};
-use slog::{error, warn};
+use slog::{error, info, warn};
 // use openssl::version::version;
 use url::Url;
 use crate::etcdserver::api::rafthttp::types::id::ID;
@@ -75,15 +76,14 @@ pub async fn check_post_response(resp: &mut Response<Body>, req:Request<Body>, t
             }
         }
         StatusCode::FORBIDDEN =>{
-
             Err(std::io::Error::new(ErrorKind::Other, CustomError::MemberRemoved.to_string()))
         }
         StatusCode::NO_CONTENT =>{
-            Err(std::io::Error::new(ErrorKind::Other, "".to_string()))
+            Ok(())
         }
         _ => {
-            format!("unexpected http status {} while posting to {}",resp.status().to_string(),req.uri().to_string());
-            Ok(())
+            // format!("https status {} while posting to {}",resp.status().to_string(),req.uri().to_string());
+            Err(std::io::Error::new(ErrorKind::Other, format!("unexpected https status {} while posting to {}",resp.status().to_string(),req.uri().to_string())))
         }
     }
 }

@@ -5,7 +5,7 @@ use slog::warn;
 use url::Url;
 use crate::etcdserver::api::rafthttp::types::default_logger;
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub struct URLs(Vec<Url>);
 
 impl URLs{

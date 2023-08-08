@@ -1,6 +1,7 @@
 use futures::SinkExt;
 use async_channel::{bounded, Sender, Receiver, SendError, RecvError, TryRecvError};
 
+#[derive(Debug)]
 pub(crate) struct Channel<T> {
     rx: Option<Receiver<T>>,
     tx: Option<Sender<T>>,
@@ -23,8 +24,11 @@ impl<T> Channel<T> {
             tx: Some(tx),
         }
     }
-    async fn try_send(&self, msg: T) -> Result<(), SendError<T>> {
+    pub async fn try_send(&self, msg: T) -> Result<(), SendError<T>> {
         if let Some(tx) = &self.tx {
+            if tx.is_full(){
+                return Err(SendError(msg));
+            }
             return tx.send(msg).await;
         }
         Ok(())

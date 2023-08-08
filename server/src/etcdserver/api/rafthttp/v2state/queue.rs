@@ -1,5 +1,5 @@
 use std::ops::Sub;
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use chrono::{DateTime, Duration, Local, TimeZone, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::etcdserver::api::rafthttp::v2state::serialize_datetime;
@@ -7,7 +7,7 @@ use crate::etcdserver::api::rafthttp::v2state::deserialize_datetime;
 
 const QUEUE_CAPACITY: isize = 200;
 
-#[derive(Clone,Copy,Serialize,Deserialize)]
+#[derive(Clone,Copy,Serialize,Deserialize,Debug)]
 pub struct RequestState{
     #[serde(serialize_with = "serialize_datetime",deserialize_with = "deserialize_datetime")]
     sending_time : DateTime<Local>,
@@ -33,7 +33,7 @@ impl RequestState{
 
 
 
-#[derive(Clone,Serialize,Deserialize)]
+#[derive(Clone,Serialize,Deserialize,Debug)]
 pub struct StateQueue{
     #[serde(serialize_with = "serialize_base_state_queue",deserialize_with = "deserialize_base_state_queue")]
     queue : Arc<RwLock<BaseStateQueue>>
@@ -83,7 +83,7 @@ impl StateQueue{
     }
 }
 
-#[derive(Clone,Serialize,Deserialize)]
+#[derive(Clone,Serialize,Deserialize,Debug)]
 pub struct BaseStateQueue{
     items : Vec<Option<RequestState>>,
     size : isize,
@@ -93,9 +93,6 @@ pub struct BaseStateQueue{
 }
 
 impl BaseStateQueue{
-
-
-
 
     pub fn len(&self) -> isize{
         self.size

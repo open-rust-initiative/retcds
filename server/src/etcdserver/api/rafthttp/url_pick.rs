@@ -3,7 +3,7 @@ use url::Url;
 use crate::etcdserver::api::rafthttp::types::urls::URLs;
 
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub struct urlPicker{
     base_url_picker : Arc<Mutex<BaseurlPicker>>,
 }
@@ -20,6 +20,7 @@ impl urlPicker{
     }
 }
 
+#[derive(Debug)]
 pub struct BaseurlPicker{
     urls : URLs,
     picked : isize

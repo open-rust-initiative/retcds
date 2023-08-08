@@ -1,5 +1,7 @@
 use std::env::Args;
+use std::fmt;
 use std::io::Error;
+use std::sync::{Arc, Mutex};
 use actix::Handler;
 use actix_ratelimit::ActorMessage;
 use raft::eraftpb::Message;
@@ -27,6 +29,8 @@ pub trait Raft{
     fn report_snapshot(&self, id: u64, status: SnapshotStatus);
 }
 
+
+
 pub trait Transporter{
     fn start(&self) -> Result<()>;
     // fn handle(&self) -> Result<HttpServer<F, I, S, B>>;
@@ -42,7 +46,7 @@ pub trait Transporter{
     fn stop(&self) -> Result<()>;
 }
 
-#[derive(Clone)]
+#[derive(Debug,Clone)]
 pub struct Transport{
 
     tlsinfo: Option<TLSInfo>,
@@ -57,7 +61,7 @@ pub struct Transport{
 
     server_stats : Option<ServerState>,
 
-    leader_stats : Option<LeaderStats>,
+    leader_stats : Option<Arc<Mutex<LeaderStats>>>,
 
     stream_client : Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>,
 
@@ -73,7 +77,7 @@ impl Transport{
                cluster_id: u64,
                snap_shotter: Option<SnapShotter>,
                server_stats: Option<ServerState>,
-               leader_stats: Option<LeaderStats>,
+               leader_stats: Option<Arc<Mutex<LeaderStats>>>,
                sc:Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>,
                pc:Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>) -> Transport{
         let mut url_vec = Vec::new();

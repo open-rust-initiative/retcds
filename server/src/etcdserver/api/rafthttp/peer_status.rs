@@ -18,7 +18,7 @@ impl FailureType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone,Debug)]
 pub struct PeerStatus{
     base_peer_status : Arc<Mutex<BasePeerStatus>>
 }
@@ -34,6 +34,7 @@ impl PeerStatus{
     }
 }
 
+#[derive(Debug)]
 pub struct BasePeerStatus {
     lg: slog::Logger,
     local: types::id::ID,
