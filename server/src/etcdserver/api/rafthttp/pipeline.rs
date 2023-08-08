@@ -38,13 +38,13 @@ pub struct Pipeline {
 
     tr: Transport,
     picker : urlPicker,
-    status : PeerStatus,
+    status : Arc<Mutex<PeerStatus>>,
     raft: Arc<Box<dyn Raft + Send + Sync>>,
 
     errorc : Channel<Error>,
 
     follower_stats: Arc<Mutex<FollowerStats>>,
-    msgc : Channel<Message>,
+    pub msgc : Channel<Message>,
     stopc : Channel<()>,
     done : Channel<()>
 }
@@ -80,7 +80,7 @@ impl Debug for Box<dyn Raft +Send +Sync+'static>{
 
 
 impl Pipeline{
-    async fn start(&mut self){
+    pub async fn start(&mut self){
         // tracing_subscriber::fmt::init();
         let subscriber = FmtSubscriber::builder()
             .with_max_level(Level::INFO)
@@ -103,7 +103,7 @@ impl Pipeline{
         info!(default_logger(),"started HTTP pipelining with remote peer remote-peer-id=>{}  local-member-id=>{}",peer_id,local_id);
     }
 
-    async fn stop(&self){
+    pub async fn stop(&self){
         for _ in 0..connPerPipeline {
             self.stopc.send(()).await.unwrap();
         }
@@ -125,7 +125,7 @@ impl Pipeline{
                     let end = Instant::now();
 
                     if err.is_err(){
-                        self.status.get_base_peer_status().lock().await.deactivate(FailureType::new_failure_type(pipelineMsg.to_string(), "write".to_string()),err.err().unwrap().to_string());
+                        self.status.lock().unwrap().deactivate(FailureType::new_failure_type(pipelineMsg.to_string(), "write".to_string()),err.err().unwrap().to_string());
                         if msg.clone().unwrap().get_msg_type() == MessageType::MsgAppend {
                             self.follower_stats.lock().unwrap().fail();
                         }
@@ -136,7 +136,7 @@ impl Pipeline{
                         self.done.send(()).await.unwrap();
                         continue;
                     };
-                    self.status.get_base_peer_status().lock().await.activate();
+                    self.status.lock().unwrap().activate();
                     if msg.clone().unwrap().get_msg_type() == MessageType::MsgAppend {
                        self.follower_stats.lock().unwrap().succ(chrono::Duration::from_std(end.sub(start)).expect("trans time error"));
                     };
@@ -315,7 +315,7 @@ mod tests {
             peer_id: ID::new(1),
             tr,
             picker,
-            status: PeerStatus::new_peer_status(ID::new(1), ID::new(1)),
+            status: Arc::new(Mutex::new(PeerStatus::new(ID::new(1), ID::new(1)))),
             raft: Arc::new(Box::new(fakeRaft {
                 recvc: Channel::new(1),
                 err: "error".to_string(),

@@ -18,24 +18,24 @@ impl FailureType {
     }
 }
 
-#[derive(Clone,Debug)]
-pub struct PeerStatus{
-    base_peer_status : Arc<Mutex<BasePeerStatus>>
-}
+// #[derive(Clone,Debug)]
+// pub struct PeerStatus{
+//     base_peer_status : Arc<Mutex<BasePeerStatus>>
+// }
 
-impl PeerStatus{
-    pub fn new_peer_status(local: types::id::ID, id: types::id::ID) -> PeerStatus {
-        PeerStatus{
-            base_peer_status: Arc::new(Mutex::new(BasePeerStatus::new(local,id)))
-        }
-    }
-    pub fn get_base_peer_status(&self) -> Arc<Mutex<BasePeerStatus>>{
-        self.base_peer_status.clone()
-    }
-}
+// impl PeerStatus{
+//     pub fn new_peer_status(local: types::id::ID, id: types::id::ID) -> PeerStatus {
+//         PeerStatus{
+//             base_peer_status: Arc::new(Mutex::new(BasePeerStatus::new(local,id)))
+//         }
+//     }
+//     pub fn get_base_peer_status(&self) -> Arc<Mutex<BasePeerStatus>>{
+//         self.base_peer_status.clone()
+//     }
+// }
 
 #[derive(Debug)]
-pub struct BasePeerStatus {
+pub struct PeerStatus {
     lg: slog::Logger,
     local: types::id::ID,
     id: types::id::ID,
@@ -43,10 +43,9 @@ pub struct BasePeerStatus {
     since: Option<SystemTime>,
 }
 
-impl BasePeerStatus{
-
-    pub fn new(local: types::id::ID, id: types::id::ID) -> BasePeerStatus {
-        BasePeerStatus {
+impl PeerStatus{
+    pub fn new(local: types::id::ID, id: types::id::ID) -> PeerStatus {
+        PeerStatus {
             lg: default_logger(),
             local,
             id,

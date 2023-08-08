@@ -12,6 +12,7 @@ mod url_pick;
 mod pipeline;
 pub mod http;
 pub mod peer;
+mod snapshot_sender;
 
 #[allow(dead_code)]
 pub fn default_logger() -> slog::Logger {

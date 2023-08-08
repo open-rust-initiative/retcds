@@ -2,7 +2,7 @@ use futures::SinkExt;
 use async_channel::{bounded, Sender, Receiver, SendError, RecvError, TryRecvError};
 
 #[derive(Debug)]
-pub(crate) struct Channel<T> {
+pub struct Channel<T> {
     rx: Option<Receiver<T>>,
     tx: Option<Sender<T>>,
 }
