@@ -12,7 +12,8 @@ pub fn transport(tlsinfo:TLSInfo) -> Client<HttpsConnector<HttpConnector>, hyper
 
     let https = hyper_rustls::HttpsConnectorBuilder::new()
         .with_tls_config(config.as_ref().clone())
-        .https_only()
+        .https_or_http()
+        .enable_http1()
         .enable_http2()
         .build();
 
@@ -53,7 +54,8 @@ mod tests {
         warn!(default_logger(),"client started");
         let client = transport(info);
         let response = client.get("https://127.0.0.1:5002".parse().unwrap()).await.unwrap();
-        warn!(default_logger(),"Response: {}", response.status());
+        assert!(response.status().is_success());
+
         // println!("Response: {}", response.status());
     }
 
@@ -79,9 +81,6 @@ mod tests {
     async fn server(tlsinfo:TLSInfo){
         // let mut rt = tokio::runtime::Runtime::new().unwrap();
         let addr = "127.0.0.1:5002".parse().unwrap();
-
-        let cert = load_certs(tlsinfo.get_cert_file().as_str());
-        let key = load_private_key(tlsinfo.get_key_file().as_str());
 
         let incoming = AddrIncoming::bind(&addr).unwrap();
         let tls_acceptor = new_tls_acceptor(tlsinfo.clone());

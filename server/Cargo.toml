@@ -14,19 +14,17 @@ members =["proto"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 raft ={path = "../raft-rs" }
-#http = "0.2.9"
-#hyper = "0.14.27"
-actix-web = "4.3.1"
+hyper = "0.14"
 anyhow = "1.0.40"
 protobuf = "2"
 futures = "0.3"
 async-channel = "1.6.1"
 env_logger = "0.9.0"
-bytes = { version = "1", optional = true }
+bytes = { version = "1"}
 thiserror = "1.0"
 crc = "3.0.1"
 slog = "2.2"
-bincode = "1.3.3"
+#bincode = "1.3.3"
 proto = { path = "proto", default-features = false}
 slog-envlogger = "2.1.0"
 slog-stdlog = "4"
@@ -37,7 +35,7 @@ prost-types = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 lazy_static = "1.4.0"
 tokio = { version = "1.16.1", features = ["full"] }
-winapi = "0.3.8"
+#winapi = "0.3.8"
 actix-ratelimit = "0.3.1"
 url = "2.4.0"
 openssl-sys = "0.9"
@@ -46,3 +44,10 @@ actix = "0.13"
 chrono = "0.4"
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 client = { path = "../client" }
+semver = "1.0"
+surge-ping = "0.8"
+hyper-rustls = {version = "0.24" , features = ["http2","default"]}
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = "0.2"
+humanize-bytes = "1.0.5"

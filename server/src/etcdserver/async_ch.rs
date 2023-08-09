@@ -1,16 +1,19 @@
-use std::sync::Arc;
-// use std::sync::mpsc::{Receiver, Sender, SendError, TryRecvError};
-use std::time::Duration;
 use futures::SinkExt;
 use async_channel::{bounded, Sender, Receiver, SendError, RecvError, TryRecvError};
-use env_logger::Env;
-use futures::task::SpawnExt;
-use raft::eraftpb::Message;
 
-#[derive(Clone)]
-pub(crate) struct Channel<T> {
+#[derive(Debug)]
+pub struct Channel<T> {
     rx: Option<Receiver<T>>,
     tx: Option<Sender<T>>,
+}
+
+impl<T> Clone for Channel<T> {
+    fn clone(&self) -> Self {
+        Self {
+            rx: self.rx.clone(),
+            tx: self.tx.clone(),
+        }
+    }
 }
 
 impl<T> Channel<T> {
@@ -21,8 +24,11 @@ impl<T> Channel<T> {
             tx: Some(tx),
         }
     }
-    async fn try_send(&self, msg: T) -> Result<(), SendError<T>> {
+    pub async fn try_send(&self, msg: T) -> Result<(), SendError<T>> {
         if let Some(tx) = &self.tx {
+            if tx.is_full(){
+                return Err(SendError(msg));
+            }
             return tx.send(msg).await;
         }
         Ok(())

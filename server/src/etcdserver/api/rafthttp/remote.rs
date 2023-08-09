@@ -1,68 +1,65 @@
-use std::sync::Arc;
-use std::time::SystemTime;
-use slog::{debug, info, warn};
-use tokio::sync::Mutex;
-use crate::etcdserver::api::rafthttp::types;
+use std::sync::{Arc, Mutex};
+use slog::warn;
+
+use raft::eraftpb::Message;
+use crate::etcdserver::api::rafthttp::peer_status::PeerStatus;
+use crate::etcdserver::api::rafthttp::pipeline::Pipeline;
+use crate::etcdserver::api::rafthttp::types::id::ID;
 use crate::etcdserver::api::rafthttp::default_logger;
-struct FailureType {
-    source: String,
-    action: String,
+use protobuf::ProtobufEnum;
+
+pub struct remote{
+    local_id : ID,
+    id : ID,
+    status : Arc<Mutex<PeerStatus>>,
+    pipeline : Pipeline,
 }
 
-struct PeerStatus{
-    base_peer_status : Arc<Mutex<BasePeerStatus>>
-}
-
-impl PeerStatus{
-    pub fn new_peer_status(lg: slog::Logger, local: types::ID, id: types::ID) -> PeerStatusRef {
-        Arc::new(Mutex::new(BasePeerStatus::new(local, id)))
-    }
-}
-
-struct BasePeerStatus {
-    lg: slog::Logger,
-    local: types::id::ID,
-    id: types::id::ID,
-    active: bool,
-    since: Option<SystemTime>,
-}
-
-impl BasePeerStatus{
-
-    pub fn new(local: types::id::ID, id: types::id::ID) -> BasePeerStatus {
-        BasePeerStatus {
-            lg: default_logger(),
-            local,
+impl remote{
+    pub fn new(local_id: ID, id: ID, status: Arc<Mutex<PeerStatus>>, pipeline: Pipeline) -> remote {
+        remote {
+            local_id,
             id,
-            active: false,
-            since: None,
+            status,
+            pipeline,
         }
     }
 
-    pub fn activate(&mut self){
-        if !self.active{
-            info!(self.lg,"peer became active peer-id=>{}",self.id.to_string());
-            self.active = true;
-            self.since = Some(SystemTime::now());
+    pub  async fn send(&self,m:Message){
+        match self.pipeline.msgc.try_send(m.clone()).await{
+            Ok(()) => {},
+            Err(e) => {
+                if self.status.lock().unwrap().is_active(){
+                    warn!(default_logger(),"dropped internal Raft message since sending buffer is full (overloaded network)");
+                    warn!(default_logger(),"message-type => {} local-member-id => {} from => {} remote-peer-id => {} remote-peer-active=> {}",
+                        ProtobufEnum::value(&m.clone().get_msg_type()),
+                        self.local_id.to_string(),
+                        m.get_from(),
+                        self.id.to_string(),
+                        self.status.lock().unwrap().is_active());
+                }
+                else {
+                    warn!(default_logger(),"dropped Raft message since sending buffer is full (overloaded network)");
+                    warn!(default_logger(),"message-type => {} local-member-id => {} from => {} remote-peer-id => {} remote-peer-active=> {}",
+                        ProtobufEnum::value(&m.clone().get_msg_type()),
+                        self.local_id.to_string(),
+                        m.get_from(),
+                        self.id.to_string(),
+                        self.status.lock().unwrap().is_active());
+                }
+            }
         }
     }
 
-    pub fn deactivate(&mut self,failure:FailureType,reason:String){
-        let msg = format!("failed to {} {} on {} {}",failure.action,self.id.to_string(),failure.source,reason);
-        if self.active{
-            warn!(self.lg,"peer became inactive(message send to peer failed) peer-id=>{} error =>{}",self.id.to_string(),msg.clone());
-            self.active = false;
-            self.since = None;
-            return;
-        }
-        debug!(self.lg,"peer deactivated again peer-id=>{} error=>{}",self.id.to_string(),msg.clone());
+    pub fn stop(&self){
+        self.pipeline.stop();
     }
 
-    pub fn is_active(&self) -> bool{
-        self.active
+    pub fn pause(&self){
+        self.stop();
     }
 
-    pub fn active_since(&self) -> Option<SystemTime>{
-        self.since
+    pub fn resume(&mut self){
+        self.pipeline.start();
     }
 }

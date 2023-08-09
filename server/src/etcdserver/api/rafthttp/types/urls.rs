@@ -5,10 +5,16 @@ use slog::warn;
 use url::Url;
 use crate::etcdserver::api::rafthttp::types::default_logger;
 
+#[derive(Clone,Debug)]
 pub struct URLs(Vec<Url>);
 
 impl URLs{
-    fn String(&self) -> String{
+
+    pub fn new(value:Vec<Url>) -> URLs{
+        URLs(value)
+    }
+
+    pub fn String(&self) -> String{
         let mut result = String::new();
         for i in 0..self.0.len(){
             result.push_str(self.0.get(i).expect("REASON").to_string().as_str());
@@ -16,21 +22,21 @@ impl URLs{
         }
         return result;
     }
-    fn len(&self) -> usize{
+    pub fn len(&self) -> usize{
         self.0.len()
     }
 
-    fn less(&self, i:usize,j:usize) -> bool{
+    pub fn less(&self, i:usize,j:usize) -> bool{
         return self.0.get(i).expect("fail get str ").to_string() < self.0.get(j).expect("fail get str").to_string();
     }
 
-    fn swap(&mut self, i: usize, j: usize) {
+    pub fn swap(&mut self, i: usize, j: usize) {
         let temp = self.0[i].to_string();
         self.0[i] = self.0[j].to_string().parse().unwrap();
         self.0[j] = temp.parse().unwrap();
     }
 
-    fn string_slice(&self) -> Vec<String>{
+    pub fn string_slice(&self) -> Vec<String>{
         let mut result = Vec::new();
         for i in 0..self.0.len(){
             result.push(self.0.get(i).expect("fail get str").to_string());
@@ -38,16 +44,23 @@ impl URLs{
         result
     }
 
-    fn sort(&mut self){
+    pub fn sort(&mut self){
         self.0.sort()
     }
 
-    
+    pub fn get_url(&self,index:usize) -> Option<Url>{
+        return self.0.get(index).cloned();
+    }
+
+    pub fn get_urls(&self) -> Vec<Url>{
+        return self.0.clone();
+    }
 }
 
-fn new_urls(strs:Vec<String>) -> Result<URLs, Error> {
+pub fn new_urls(strs:Vec<String>) -> Result<URLs, Error> {
+    // warn!(default_logger(),"new_urls len=>{}",strs.len());
     let mut urls = Vec::with_capacity(strs.len());
-    if urls.len() == 0{
+    if strs.len() == 0{
         return  Err(Error::new(ErrorKind::Other, "no valid URLs given"))
     }
 
@@ -64,7 +77,7 @@ fn new_urls(strs:Vec<String>) -> Result<URLs, Error> {
             warn!(default_logger(),"URL address does not have the form \"host:port\": {}", s);
             return  Err(Error::new(ErrorKind::Other, "URL address does not have the form \"host:port\": {}"))
         }
-        if u.path() != "" {
+        if u.path() != "/" {
             warn!(default_logger(),"URL must not contain a path: {}", s);
             return  Err(Error::new(ErrorKind::Other, "URL must not contain a path"))
         }

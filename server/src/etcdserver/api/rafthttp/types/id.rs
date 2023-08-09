@@ -1,7 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord,Debug)]
 pub struct ID(u64);
 
 impl fmt::LowerHex for ID {
@@ -11,8 +11,12 @@ impl fmt::LowerHex for ID {
 }
 
 impl ID {
+    pub fn new(id: u64) -> ID {
+        ID(id)
+    }
+
     pub fn to_string(&self) -> String {
-        format!("{:x}", i)
+        self.0.to_string()
     }
 }
 
