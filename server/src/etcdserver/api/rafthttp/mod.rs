@@ -13,6 +13,7 @@ mod pipeline;
 pub mod http;
 pub mod peer;
 mod snapshot_sender;
+pub mod test_util;
 
 #[allow(dead_code)]
 pub fn default_logger() -> slog::Logger {

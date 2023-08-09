@@ -1,5 +1,6 @@
 use std::env::Args;
 use std::fmt;
+use std::fmt::Debug;
 use std::io::Error;
 use std::sync::{Arc, Mutex};
 use actix::Handler;
@@ -20,6 +21,7 @@ use crate::etcdserver::api::rafthttp::types::urls::URLs;
 use crate::etcdserver::api::rafthttp::v2state::leader::LeaderStats;
 use crate::etcdserver::api::rafthttp::v2state::server::ServerState;
 use crate::etcdserver::api::rafthttp::default_logger;
+use crate::etcdserver::async_ch::Channel;
 
 #[async_trait]
 pub trait Raft{
@@ -54,18 +56,33 @@ pub struct Transport{
     dial_timeout : std::time::Duration,
     dial_retry_frequency : f64,
 
-    ID : ID,
-    URLS : URLs,
-    cluster_id : ID,
+    pub ID : ID,
+    pub URLS : URLs,
+    pub cluster_id : ID,
+    pub raft: Arc<Box<dyn Raft + Send + Sync>>,
     snap_shotter : Option<SnapShotter>,
 
     server_stats : Option<ServerState>,
 
     leader_stats : Option<Arc<Mutex<LeaderStats>>>,
 
-    stream_client : Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>,
+    pub errorc : Option<Channel<Error>>,
 
-    pipeline_client: Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>
+    pub stream_client : Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>,
+
+    pub pipeline_client: Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>
+}
+
+impl Clone for Box<dyn Raft +Send +Sync+'static>{
+    fn clone(&self) -> Self {
+        self.clone()
+    }
+}
+
+impl Debug for Box<dyn Raft +Send +Sync+'static>{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("raft").finish()
+    }
 }
 
 impl Transport{
@@ -79,7 +96,9 @@ impl Transport{
                server_stats: Option<ServerState>,
                leader_stats: Option<Arc<Mutex<LeaderStats>>>,
                sc:Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>,
-               pc:Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>) -> Transport{
+               pc:Option<Client<HttpsConnector<HttpConnector>, hyper::Body>>,
+               errorc:Option<Channel<Error>>,
+               raft: Arc<Box<dyn Raft + Send + Sync>>,) -> Transport{
         let mut url_vec = Vec::new();
         for url in urls{
             url_vec.push(Url::parse(url.as_str()).unwrap());
@@ -95,15 +114,25 @@ impl Transport{
             ID : ID::new(id),
             URLS : URLs::new(url_vec),
             cluster_id : ID::new(cluster_id),
+            raft,
             snap_shotter,
 
             server_stats,
 
             leader_stats,
 
+            errorc,
             stream_client : sc,
             pipeline_client: pc,
         }
+    }
+
+    pub fn get_raft(&self) -> Arc<Box<dyn Raft + Send + Sync>>{
+        self.raft.clone()
+    }
+
+    pub fn get_errorc(&self) -> Option<Channel<Error>>{
+        self.errorc.clone()
     }
 
     pub fn get_id(&self) -> ID{
@@ -118,11 +147,11 @@ impl Transport{
         self.cluster_id
     }
 
-    pub fn get_pipeline_client(&self) -> Option<Client<HttpsConnector<HttpConnector>>> {
-        self.pipeline_client.clone()
-    }
-
-    pub fn get_stream_client(&self) -> Option<Client<HttpsConnector<HttpConnector>>> {
-        self.stream_client.clone()
-    }
+    // pub fn get_pipeline_client(&self) -> Option<Client<HttpsConnector<HttpConnector>>> {
+    //     self.pipeline_client.clone()
+    // }
+    //
+    // pub fn get_stream_client(&self) -> Option<Client<HttpsConnector<HttpConnector>>> {
+    //     self.stream_client.clone()
+    // }
 }

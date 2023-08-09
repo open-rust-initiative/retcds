@@ -50,3 +50,4 @@ hyper-rustls = {version = "0.24" , features = ["http2","default"]}
 async-trait = "0.1"
 tracing = "0.1"
 tracing-subscriber = "0.2"
+humanize-bytes = "1.0.5"

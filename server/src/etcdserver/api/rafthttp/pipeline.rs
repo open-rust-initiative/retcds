@@ -66,19 +66,6 @@ impl Clone for Pipeline{
     }
 }
 
-impl Clone for Box<dyn Raft +Send +Sync+'static>{
-    fn clone(&self) -> Self {
-        self.clone()
-    }
-}
-
-impl Debug for Box<dyn Raft +Send +Sync+'static>{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("raft").finish()
-    }
-}
-
-
 impl Pipeline{
     pub async fn start(&mut self){
         // tracing_subscriber::fmt::init();
@@ -154,7 +141,7 @@ impl Pipeline{
         let request = create_POST_request(u.clone(), RaftPrefix, data.clone(), "application/protobuf", self.tr.get_urls(), self.tr.get_id(), self.tr.get_cluster_id()).unwrap();
         let req = create_POST_request(u.clone(), RaftPrefix, data.clone(), "application/protobuf", self.tr.get_urls(), self.tr.get_id(), self.tr.get_cluster_id()).unwrap();
 
-        let mut resp = self.tr.get_pipeline_client()
+        let mut resp = self.tr.pipeline_client.clone()
             .expect("no pipeline client")
             .request(request)
             .await;
@@ -180,6 +167,7 @@ impl Pipeline{
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
+    use std::future::Future;
     use std::io::Error;
     use std::sync::{Arc, Mutex};
     use async_trait::async_trait;
@@ -199,6 +187,7 @@ mod tests {
     use raft::SnapshotStatus;
     use crate::etcdserver::api::rafthttp::peer_status::PeerStatus;
     use crate::etcdserver::api::rafthttp::pipeline::{connPerPipeline, Pipeline};
+    use crate::etcdserver::api::rafthttp::test_util::{fakeRaft, new_tr, server_err, server_succ};
     use crate::etcdserver::api::rafthttp::transport::{Raft, Transport};
     use crate::etcdserver::api::rafthttp::types::id::ID;
     use crate::etcdserver::api::rafthttp::types::urls::URLs;
@@ -216,19 +205,7 @@ mod tests {
         let additional_usages = binding.client_auth();
         let info = self_cert(dirpath, hosts, self_signed_cert_validity, Some(additional_usages)).unwrap();
         let picker = urlPicker::new_url_picker(urls);
-        let tr = Transport::new(
-            vec!["https://localhost:2380".to_string()],
-            None,
-            std::time::Duration::from_secs(1),
-            0.1,
-            1,
-            1,
-            None,
-            None,
-            None,
-            None,
-            Option::from(transport(info.clone())),
-        );
+        let tr = new_tr("https://localhost:2380".to_string(),info.clone());
         server_err(info.clone()).await;
         let p = startTestPipeline(tr, picker).await;
         let mut m = Message::default();
@@ -249,19 +226,7 @@ mod tests {
         let additional_usages = binding.client_auth();
         let info = self_cert(dirpath, hosts, self_signed_cert_validity, Some(additional_usages)).unwrap();
         let picker = urlPicker::new_url_picker(urls);
-        let tr = Transport::new(
-            vec!["https://localhost:2380".to_string()],
-            None,
-            std::time::Duration::from_secs(1),
-            0.1,
-            1,
-            1,
-            None,
-            None,
-            None,
-            None,
-            Option::from(transport(info.clone())),
-        );
+        let tr = new_tr("https://localhost:2380".to_string(),info.clone());
         server_succ(info.clone()).await;
         let p = startTestPipeline(tr, picker).await;
         let mut m = Message::default();
@@ -282,19 +247,7 @@ mod tests {
         let additional_usages = binding.client_auth();
         let info = self_cert(dirpath, hosts, self_signed_cert_validity, Some(additional_usages)).unwrap();
         let picker = urlPicker::new_url_picker(urls);
-        let tr = Transport::new(
-            vec!["https://localhost:2380".to_string()],
-            None,
-            std::time::Duration::from_secs(1),
-            0.1,
-            1,
-            1,
-            None,
-            None,
-            None,
-            None,
-            Option::from(transport(info.clone())),
-        );
+        let tr = new_tr("https://localhost:2380".to_string(),info.clone());
         server_succ(info.clone()).await;
         let p = startTestPipeline(tr, picker).await;
         let mut m = Message::default();
@@ -330,116 +283,5 @@ mod tests {
         };
         p.start().await;
         return p;
-    }
-
-    struct fakeRaft {
-        recvc: Channel<Message>,
-        err: String,
-        removed_id: u64,
-    }
-
-
-    #[async_trait]
-    impl Raft for fakeRaft {
-        async fn process(&self, m: Message) -> Result<(), Error> {
-            select! {
-                msg = self.recvc.recv() =>{},
-            }
-            return Err(Error::new(std::io::ErrorKind::Other, self.err.clone()));
-        }
-
-        fn is_id_removed(&self, id: u64) -> bool {
-            return id == self.removed_id;
-        }
-
-        fn report_unreachable(&self, id: u64) {
-            return;
-        }
-
-        fn report_snapshot(&self, id: u64, status: SnapshotStatus) {
-            return;
-        }
-    }
-
-    async fn server_succ(tlsinfo: TLSInfo) {
-        let addr = "127.0.0.1:2380".parse().unwrap();
-        let incoming = AddrIncoming::bind(&addr).unwrap();
-        let tls_acceptor = new_tls_acceptor(tlsinfo.clone());
-        let acceptor = TlsAcceptor::builder()
-            .with_tls_config((*tlsinfo.clone().server_config()).clone())
-            .with_all_versions_alpn()
-            .with_incoming(incoming);
-        let make_svc = make_service_fn(|_| {
-            async {
-                Ok::<_, Infallible>(service_fn(handler_succ))
-            }
-        });
-
-        tokio::spawn(async move {
-            let server = Server::builder(acceptor)
-                .http2_only(true)
-                .serve(make_svc);
-            server.await.unwrap();
-        });
-    }
-
-    async fn server_err(tlsinfo: TLSInfo) {
-        let addr = "127.0.0.1:2380".parse().unwrap();
-        let incoming = AddrIncoming::bind(&addr).unwrap();
-        let tls_acceptor = new_tls_acceptor(tlsinfo.clone());
-        let acceptor = TlsAcceptor::builder()
-            .with_tls_config((*tlsinfo.clone().server_config()).clone())
-            .with_all_versions_alpn()
-            .with_incoming(incoming);
-        let make_svc = make_service_fn(|_| {
-            async {
-                Ok::<_, Infallible>(service_fn(handler_err))
-            }
-        });
-
-        tokio::spawn(async move {
-            let server = Server::builder(acceptor)
-                .http2_only(true)
-                .serve(make_svc);
-            server.await.unwrap();
-        });
-    }
-
-    async fn handler_err(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-        let path = req.uri().path();
-        match path {
-            "/raft" => {
-                // 处理 "/about" 路径
-                let response = Response::builder()
-                    .status(403)
-                    .body(Body::from("error"))
-                    .unwrap();
-                Ok(response)
-            }
-            _ => {
-                // 处理其他路径
-                let response = Response::new(Body::from("Not found"));
-                Ok(response)
-            }
-        }
-    }
-
-    async fn handler_succ(req: Request<Body>) -> Result<Response<Body>, Infallible> {
-        let path = req.uri().path();
-        match path {
-            "/raft" => {
-                // 处理 "/about" 路径
-                let response = Response::builder()
-                    .status(204)
-                    .body(Body::from("error"))
-                    .unwrap();
-                Ok(response)
-            }
-            _ => {
-                // 处理其他路径
-                let response = Response::new(Body::from("Not found"));
-                Ok(response)
-            }
-        }
     }
 }
